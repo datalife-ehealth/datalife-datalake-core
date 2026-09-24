@@ -1,0 +1,25 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATALIFE_DATABASE_URL: postgresql+psycopg://datalife:datalife@postgres:5432/datalife
+      DATALIFE_OBJECT_STORAGE_PATH: /var/datalife/objects
+      DATALIFE_AUDIT_SECRET: ${DATALIFE_AUDIT_SECRET:-local-dev-secret}
+      DATALIFE_MASTER_PHYSICIAN_IDS: PHY-0001
+    depends_on:
+      - postgres
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: datalife
+      POSTGRES_PASSWORD: datalife
+      POSTGRES_DB: datalife
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:
