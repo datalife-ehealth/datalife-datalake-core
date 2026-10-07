@@ -25,6 +25,9 @@ postgres = ["psycopg[binary]>=3.1.0"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools]
+py-modules = ["main"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
