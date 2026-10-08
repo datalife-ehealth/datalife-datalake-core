@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=7.0.0", "httpx>=0.27.0"]
+performance = ["pytest-benchmark>=4.0.0"]
 postgres = ["psycopg[binary]>=3.1.0"]
 
 [tool.setuptools.packages.find]
@@ -28,3 +29,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+  "performance: marks tests as performance benchmarks (skipped by default)",
+]
+addopts = "-m 'not performance'"

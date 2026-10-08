@@ -1,5 +1,6 @@
 """Patient OTP grants and physician glass-break."""
 
+import threading
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +14,7 @@ router = APIRouter(prefix="/api/v1/access", tags=["access"])
 _settings = get_settings()
 _controller = AccessController(_settings.audit_secret, _settings.physician_ids())
 _audit: list[dict[str, Any]] = []
+_audit_lock = threading.Lock()
 
 
 class OtpRequest(BaseModel):
@@ -37,12 +39,22 @@ def controller() -> AccessController:
 
 
 def audit_log() -> list[dict[str, Any]]:
-    return _audit
+    with _audit_lock:
+        return list(_audit)
+
+
+def reset_access_store() -> None:
+    """Reset shared audit log and grant store for test isolation."""
+    with _audit_lock:
+        _audit.clear()
+    _controller.reset()
 
 
 def _append(event: dict[str, Any]) -> None:
-    previous = _audit[-1]["block_hash"] if _audit else "0" * 64
-    _audit.append(seal([event], previous, len(_audit)) | {"event": event})
+    with _audit_lock:
+        previous = _audit[-1]["block_hash"] if _audit else "0" * 64
+        block = seal([event], previous, len(_audit)) | {"event": event}
+        _audit.append(block)
 
 
 @router.post("/otp")

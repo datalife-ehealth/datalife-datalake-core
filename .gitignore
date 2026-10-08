@@ -7,3 +7,5 @@ var/
 *.egg-info/
 dist/
 build/
+.benchmarks/
+benchmark_results.json

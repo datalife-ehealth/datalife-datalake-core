@@ -91,10 +91,23 @@ curl http://127.0.0.1:8000/api/v1/audit/verify
 
 `ok` is true when every block height, previous hash, Merkle root, and block hash still match the stored records.
 
-## Tests
+## Tests and Benchmarks
+
+Run routine unit and concurrency tests (`tests/test_merkle.py`, `tests/test_access.py`, `tests/test_concurrency.py`):
 
 ```bash
 pytest -q
 ```
 
-`tests/test_merkle.py` checks deterministic roots and tamper detection. `tests/test_access.py` checks OTP expiry and master-physician enforcement.
+Benchmarks are marked with `performance` and skipped by default during normal test runs via `addopts = "-m 'not performance'"` in `pyproject.toml`. To measure synthetic Merkle root calculations, chain verification depth, and tamper detection:
+
+```bash
+pip install -e ".[performance]"
+pytest -m performance --benchmark-only
+```
+
+Optionally export machine-readable benchmark JSON results for CI tracking:
+
+```bash
+pytest -m performance --benchmark-only --benchmark-json=benchmark_results.json
+```
