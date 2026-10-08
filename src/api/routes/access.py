@@ -1,5 +1,6 @@
 """Patient OTP grants and physician glass-break."""
 
+import copy
 import threading
 from typing import Any
 
@@ -40,7 +41,8 @@ def controller() -> AccessController:
 
 def audit_log() -> list[dict[str, Any]]:
     with _audit_lock:
-        return list(_audit)
+        snapshot = list(_audit)
+    return copy.deepcopy(snapshot)
 
 
 def reset_access_store() -> None:
@@ -53,7 +55,7 @@ def reset_access_store() -> None:
 def _append(event: dict[str, Any]) -> None:
     with _audit_lock:
         previous = _audit[-1]["block_hash"] if _audit else "0" * 64
-        block = seal([event], previous, len(_audit)) | {"event": event}
+        block = seal([event], previous, len(_audit))
         _audit.append(block)
 
 

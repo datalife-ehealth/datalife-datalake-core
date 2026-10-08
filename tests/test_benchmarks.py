@@ -48,7 +48,7 @@ def _generate_deterministic_chain(depth: int, seed: int = 42) -> list[dict[str, 
             "physician_id": f"PHY-{rng.randint(100, 999)}",
             "payload_hash": f"{rng.getrandbits(256):064x}",
         }
-        block = seal([event], previous, i) | {"event": event}
+        block = seal([event], previous, i)
         chain.append(block)
         previous = block["block_hash"]
     return chain

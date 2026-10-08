@@ -102,7 +102,7 @@ pytest -q
 Benchmarks are marked with `performance` and skipped by default during normal test runs via `addopts = "-m 'not performance'"` in `pyproject.toml`. To measure synthetic Merkle root calculations, chain verification depth, and tamper detection:
 
 ```bash
-pip install -e ".[performance]"
+pip install -e ".[test,performance]"
 pytest -m performance --benchmark-only
 ```
 
