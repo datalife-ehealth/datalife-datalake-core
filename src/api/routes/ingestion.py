@@ -30,15 +30,12 @@ def reset_store() -> None:
 
 @router.post("")
 def ingest(payload: IngestRequest) -> dict[str, Any]:
-    # Retained structural rejection until the dedicated PII policy work lands. It runs
-    # on the raw body and never echoes it back.
-    lowered = payload.body.lower()
-    if any(field in lowered for field in ("<cpf>", "patientname")):
-        raise HTTPException(status_code=422, detail="personal identifiers are not accepted by the lake tier")
-
-    # Parse the body under configured bounds. parse_payload fails closed on malformed,
-    # oversized, over-nested, or kind/media-type-mismatched input. The reason is a
-    # stable category string and is safe to surface without reflecting the payload.
+    # Parse the body under configured bounds first. parse_payload fails closed on
+    # malformed, oversized, non-UTF-8, over-nested, or kind/media-type-mismatched
+    # input. Running it before the PII scan below means the size and encoding checks
+    # happen ahead of any whole-string work such as .lower(), so an oversized or
+    # non-UTF-8 payload is rejected without first being copied. The reason is a stable
+    # category string and is safe to surface without reflecting the payload.
     settings = get_settings()
     try:
         parse_payload(
@@ -52,6 +49,12 @@ def ingest(payload: IngestRequest) -> dict[str, Any]:
         )
     except ParseError as exc:
         raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+    # Retained structural rejection until the dedicated PII policy work lands. It runs
+    # on the raw body and never echoes it back.
+    lowered = payload.body.lower()
+    if any(field in lowered for field in ("<cpf>", "patientname")):
+        raise HTTPException(status_code=422, detail="personal identifiers are not accepted by the lake tier")
 
     # Digest is computed over the original UTF-8 body so parser normalization cannot
     # change the existing payload_sha256 contract.

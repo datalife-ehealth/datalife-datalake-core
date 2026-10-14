@@ -8,6 +8,7 @@ external entities, or proprietary data are used.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -171,6 +172,73 @@ def test_dicom_wrong_media_type_is_rejected(client):
 
 def test_dicom_array_root_is_rejected(client):
     assert _ingest(client, "dicom", "application/dicom+json", "[]").status_code == 422
+
+
+# ----------------------------------------- review follow-ups: hardened edge cases
+
+
+def test_dicom_nested_object_in_value_is_rejected(client):
+    # A binary reference smuggled as a nested object inside Value must not slip through.
+    body = '{"00080060": {"vr": "CS", "Value": [{"BulkDataURI": "http://x/y"}]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_dicom_nested_array_in_value_is_rejected(client):
+    body = '{"00080060": {"vr": "CS", "Value": [[1, 2]]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_dicom_boolean_in_value_is_rejected(client):
+    body = '{"00080060": {"vr": "CS", "Value": [true]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_dicom_scalar_values_are_accepted(client):
+    body = '{"00200013": {"vr": "IS", "Value": [1, 2.5, "3"]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 200
+
+
+def test_dicom_unknown_entry_field_is_rejected(client):
+    body = '{"00080060": {"vr": "CS", "Value": ["MR"], "unexpected": 1}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_dicom_case_collision_is_rejected(client):
+    # Distinct raw keys that normalize to the same tag must fail rather than overwrite.
+    body = '{"0008beef": {"vr": "CS", "Value": ["A"]}, "0008BEEF": {"vr": "LO", "Value": ["B"]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_json_rejects_nan_and_infinity(client, literal):
+    body = '{"x": ' + literal + "}"
+    assert _ingest(client, "json", "application/json", body).status_code == 422
+
+
+def test_lone_surrogate_body_is_rejected_cleanly(client):
+    # An escaped lone surrogate cannot be encoded as UTF-8; it must map to 422, not 500.
+    # Send the request as raw ASCII bytes (json.dumps escapes the surrogate to \ud800)
+    # so the server decodes the lone surrogate exactly as a hostile client would send it.
+    raw = json.dumps(
+        {
+            "subject_key": "subj-0001",
+            "kind": "json",
+            "media_type": "application/json",
+            "body": '{"x": "\ud800"}',
+        }
+    )
+    response = client.post("/api/v1/ingest", content=raw, headers={"content-type": "application/json"})
+    assert response.status_code == 422
+
+
+def test_parse_payload_rejects_lone_surrogate():
+    with pytest.raises(ParseError):
+        parse_payload("json", "application/json", '{"x": "\ud800"}', **_LIMITS)
+
+
+def test_parse_payload_rejects_nan_constant():
+    with pytest.raises(ParseError):
+        parse_payload("json", "application/json", '{"x": NaN}', **_LIMITS)
 
 
 # -------------------------------------------------- non-reflective error contract

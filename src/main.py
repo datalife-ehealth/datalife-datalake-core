@@ -1,6 +1,8 @@
 """FastAPI entrypoint for the DataLife data lake core."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from api.routes import access, audit, ingestion
 
@@ -15,6 +17,19 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(_request: Request, _exc: RequestValidationError) -> JSONResponse:
+    """Return a stable 422 for request-validation failures without reflecting input.
+
+    FastAPI's default handler echoes the offending ``input`` back in the response.
+    That both leaks the submitted payload (which may embed secrets) and crashes when
+    the input cannot be re-encoded as UTF-8 (for example an escaped lone surrogate
+    such as ``\\ud800``, which pydantic rejects before the route runs). Replacing it
+    with a fixed, non-reflective message keeps those cases a clean, logged-safe 422.
+    """
+    return JSONResponse(status_code=422, content={"detail": "request payload failed validation"})
+
 
 app.include_router(ingestion.router)
 app.include_router(access.router)

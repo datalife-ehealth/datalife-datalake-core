@@ -107,17 +107,22 @@ _REASON_SIZE = "payload exceeds the maximum allowed size"
 _REASON_MEDIA_MISMATCH = "media_type is not compatible with the declared kind"
 _REASON_DEPTH = "payload nesting exceeds the maximum allowed depth"
 _REASON_NODES = "payload exceeds the maximum allowed number of nodes"
+_REASON_ENCODING = "payload is not valid UTF-8 text"
 _REASON_JSON_SYNTAX = "payload is not valid JSON"
 _REASON_JSON_ROOT = "JSON root must be an object or an array"
 _REASON_JSON_DUPLICATE = "JSON object contains duplicate keys"
+_REASON_JSON_CONSTANT = "JSON must not contain NaN or Infinity values"
 _REASON_XML_SYNTAX = "payload is not well-formed XML"
 _REASON_XML_DTD = "XML document type definitions and entities are not accepted"
 _REASON_DICOM_ROOT = "DICOM JSON metadata must be a single object of tags"
 _REASON_DICOM_TAG = "DICOM tag keys must be eight hexadecimal digits"
 _REASON_DICOM_ENTRY = "DICOM tag entry is malformed"
+_REASON_DICOM_UNKNOWN_KEY = "DICOM tag entry contains unsupported fields"
 _REASON_DICOM_VR = "DICOM value representation is unsupported in this subset"
 _REASON_DICOM_BINARY = "DICOM binary, inline-binary, and bulk-data references are not accepted"
 _REASON_DICOM_VALUE = "DICOM Value array exceeds the maximum allowed length"
+_REASON_DICOM_VALUE_TYPE = "DICOM Value entries must be scalar strings or numbers"
+_REASON_DICOM_COLLISION = "DICOM tag is duplicated after case normalization"
 
 
 def parse_payload(
@@ -154,8 +159,15 @@ def parse_payload(
         raise ParseError(_REASON_MEDIA_MISMATCH) from exc
 
     # Size is checked against the raw UTF-8 encoding, matching the digest contract,
-    # and before any parsing so hostile inputs cannot force expensive work.
-    if len(body.encode("utf-8")) > max_body_bytes:
+    # and before any parsing so hostile inputs cannot force expensive work. The encode
+    # also rejects strings carrying lone surrogates (e.g. an escaped "\ud800") that
+    # cannot be represented as UTF-8, mapping them to a clean 422 instead of letting a
+    # later UnicodeEncodeError surface as a 500.
+    try:
+        body_bytes = body.encode("utf-8")
+    except UnicodeError as exc:
+        raise ParseError(_REASON_ENCODING) from exc
+    if len(body_bytes) > max_body_bytes:
         raise ParseError(_REASON_SIZE)
 
     if media_type not in _ALLOWED_MEDIA_TYPES[payload_kind]:
@@ -216,6 +228,15 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return dict(pairs)
 
 
+def _reject_constant(_token: str) -> Any:
+    """``parse_constant`` hook rejecting the non-standard NaN/Infinity literals.
+
+    ``json.loads`` accepts ``NaN``, ``Infinity``, and ``-Infinity`` by default; strict
+    ingestion must not, so any of them fails closed here.
+    """
+    raise ParseError(_REASON_JSON_CONSTANT)
+
+
 def _measure_json(value: Any, max_depth: int, max_nodes: int) -> list[str]:
     """Enforce depth/node limits iteratively and collect observed object keys."""
     keys: list[str] = []
@@ -241,7 +262,11 @@ def _measure_json(value: Any, max_depth: int, max_nodes: int) -> list[str]:
 def _parse_json(body: str, max_depth: int, max_nodes: int) -> tuple[Any, list[str]]:
     _scan_json_depth(body, max_depth)
     try:
-        value = json.loads(body, object_pairs_hook=_reject_duplicate_keys)
+        value = json.loads(
+            body,
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_constant,
+        )
     except ParseError:
         raise
     except (json.JSONDecodeError, RecursionError, ValueError) as exc:
@@ -353,6 +378,16 @@ _DICOM_PIXEL_DATA_TAG = "7FE00010"
 # Keys inside a tag entry that indicate out-of-band binary and are never accepted.
 _DICOM_BINARY_KEYS: frozenset[str] = frozenset({"InlineBinary", "BulkDataURI"})
 
+# The only fields a tag entry may carry in this subset. Anything else (including the
+# binary keys above and any other out-of-band reference) is rejected.
+_DICOM_ALLOWED_ENTRY_KEYS: frozenset[str] = frozenset({"vr", "Value"})
+
+# Scalar JSON types permitted inside a ``Value`` array. Nested objects and arrays are
+# rejected so binary references cannot be smuggled in as nested entries, and so the
+# subset stays flat and predictable for downstream validation. ``bool`` is excluded
+# explicitly because it is a subclass of ``int``.
+_DICOM_SCALAR_TYPES: tuple[type, ...] = (str, int, float)
+
 
 def _is_dicom_tag(tag: str) -> bool:
     """A tag is exactly eight hexadecimal digits (group + element)."""
@@ -379,12 +414,21 @@ def _parse_dicom_json(
         tag = raw_tag.upper()
         if not _is_dicom_tag(tag):
             raise ParseError(_REASON_DICOM_TAG)
+        # Tags that are distinct in the raw document but collide after case
+        # normalization (e.g. "0008beef" and "0008BEEF") would otherwise silently
+        # overwrite one another, so reject the collision outright.
+        if tag in normalized:
+            raise ParseError(_REASON_DICOM_COLLISION)
         if tag == _DICOM_PIXEL_DATA_TAG:
             raise ParseError(_REASON_DICOM_BINARY)
         if not isinstance(entry, dict):
             raise ParseError(_REASON_DICOM_ENTRY)
         if _DICOM_BINARY_KEYS & entry.keys():
             raise ParseError(_REASON_DICOM_BINARY)
+        # Reject any field outside the documented subset rather than silently dropping
+        # it, so out-of-band references cannot ride along unnoticed.
+        if entry.keys() - _DICOM_ALLOWED_ENTRY_KEYS:
+            raise ParseError(_REASON_DICOM_UNKNOWN_KEY)
 
         vr = entry.get("vr")
         if not isinstance(vr, str):
@@ -399,9 +443,12 @@ def _parse_dicom_json(
                 raise ParseError(_REASON_DICOM_ENTRY)
             if len(value) > max_dicom_values:
                 raise ParseError(_REASON_DICOM_VALUE)
+            # Every element must be a plain scalar; nested objects/arrays (the vector
+            # for smuggling BulkDataURI/InlineBinary inside Value) are rejected.
+            for element in value:
+                if isinstance(element, bool) or not isinstance(element, _DICOM_SCALAR_TYPES):
+                    raise ParseError(_REASON_DICOM_VALUE_TYPE)
 
-        # Only the understood keys are carried forward; unknown keys other than the
-        # explicitly rejected binary ones are dropped from the normalized view.
         normalized[tag] = {"vr": vr, "Value": value}
         tags.append(tag)
 
