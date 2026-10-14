@@ -260,6 +260,16 @@ def test_dicom_float_overflow_in_value_is_rejected(client):
     assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
 
 
+def test_dicom_explicit_null_value_rejected(client):
+    body = '{"00080060": {"vr": "CS", "Value": null}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_dicom_negative_float_overflow_rejected(client):
+    body = '{"00200032": {"vr": "DS", "Value": [-1e999]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
 def test_escaped_surrogate_inside_json_string_is_rejected(client):
     # The body field is valid ASCII; the inner JSON decodes "\ud800" to a lone
     # surrogate, which must be rejected rather than carried forward.

@@ -467,8 +467,8 @@ def _parse_dicom_json(
         if vr not in _SUPPORTED_DICOM_VRS:
             raise ParseError(_REASON_DICOM_VR)
 
-        value = entry.get("Value")
-        if value is not None:
+        if "Value" in entry:
+            value = entry["Value"]
             if not isinstance(value, list):
                 raise ParseError(_REASON_DICOM_ENTRY)
             if len(value) > max_dicom_values:
@@ -478,6 +478,8 @@ def _parse_dicom_json(
             for element in value:
                 if isinstance(element, bool) or not isinstance(element, _DICOM_SCALAR_TYPES):
                     raise ParseError(_REASON_DICOM_VALUE_TYPE)
+        else:
+            value = None
 
         normalized[tag] = {"vr": vr, "Value": value}
         tags.append(tag)
