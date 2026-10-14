@@ -19,16 +19,24 @@ app = FastAPI(
 )
 
 @app.exception_handler(RequestValidationError)
-async def validation_exception_handler(_request: Request, _exc: RequestValidationError) -> JSONResponse:
-    """Return a stable 422 for request-validation failures without reflecting input.
+async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return a 422 that keeps the structured error list but never reflects input.
 
-    FastAPI's default handler echoes the offending ``input`` back in the response.
+    FastAPI's default handler echoes the offending ``input`` back in each error entry.
     That both leaks the submitted payload (which may embed secrets) and crashes when
     the input cannot be re-encoded as UTF-8 (for example an escaped lone surrogate
-    such as ``\\ud800``, which pydantic rejects before the route runs). Replacing it
-    with a fixed, non-reflective message keeps those cases a clean, logged-safe 422.
+    such as ``\\ud800``, which pydantic rejects before the route runs).
+
+    We preserve the ``{"detail": [{"type", "loc", "msg"}, ...]}`` shape advertised by
+    OpenAPI as ``HTTPValidationError`` so clients and the schema stay consistent, but
+    drop the ``input`` (and any ``ctx``) fields so nothing from the request body is
+    echoed and the response is always UTF-8 encodable.
     """
-    return JSONResponse(status_code=422, content={"detail": "request payload failed validation"})
+    detail = [
+        {"type": error.get("type"), "loc": list(error.get("loc", ())), "msg": error.get("msg")}
+        for error in exc.errors()
+    ]
+    return JSONResponse(status_code=422, content={"detail": detail})
 
 
 app.include_router(ingestion.router)

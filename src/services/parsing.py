@@ -28,6 +28,8 @@ and reads no files. It is pure, deterministic, and side-effect free.
 from __future__ import annotations
 
 import json
+import math
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -112,6 +114,7 @@ _REASON_JSON_SYNTAX = "payload is not valid JSON"
 _REASON_JSON_ROOT = "JSON root must be an object or an array"
 _REASON_JSON_DUPLICATE = "JSON object contains duplicate keys"
 _REASON_JSON_CONSTANT = "JSON must not contain NaN or Infinity values"
+_REASON_JSON_NONFINITE = "JSON numbers must be finite"
 _REASON_XML_SYNTAX = "payload is not well-formed XML"
 _REASON_XML_DTD = "XML document type definitions and entities are not accepted"
 _REASON_DICOM_ROOT = "DICOM JSON metadata must be a single object of tags"
@@ -237,6 +240,28 @@ def _reject_constant(_token: str) -> Any:
     raise ParseError(_REASON_JSON_CONSTANT)
 
 
+def _parse_finite_float(token: str) -> float:
+    """``parse_float`` hook rejecting values that overflow to infinity.
+
+    ``parse_constant`` only sees the literal ``Infinity`` token. A finite-looking
+    literal such as ``1e999`` is handled as an ordinary number and overflows to
+    ``inf`` during float conversion, so it must be caught here instead.
+    """
+    value = float(token)
+    if not math.isfinite(value):
+        raise ParseError(_REASON_JSON_NONFINITE)
+    return value
+
+
+def _has_surrogate(text: str) -> bool:
+    """True if ``text`` contains any UTF-16 surrogate code point.
+
+    JSON escapes such as ``\\ud800`` decode into lone surrogate characters that are
+    not valid UTF-8 and would crash a later serializer. Such strings are rejected.
+    """
+    return any(0xD800 <= ord(char) <= 0xDFFF for char in text)
+
+
 def _measure_json(value: Any, max_depth: int, max_nodes: int) -> list[str]:
     """Enforce depth/node limits iteratively and collect observed object keys."""
     keys: list[str] = []
@@ -251,11 +276,15 @@ def _measure_json(value: Any, max_depth: int, max_nodes: int) -> list[str]:
             raise ParseError(_REASON_DEPTH)
         if isinstance(current, dict):
             for key, child in current.items():
+                if _has_surrogate(key):
+                    raise ParseError(_REASON_ENCODING)
                 keys.append(key)
                 stack.append((child, depth + 1))
         elif isinstance(current, list):
             for child in current:
                 stack.append((child, depth + 1))
+        elif isinstance(current, str) and _has_surrogate(current):
+            raise ParseError(_REASON_ENCODING)
     return keys
 
 
@@ -266,6 +295,7 @@ def _parse_json(body: str, max_depth: int, max_nodes: int) -> tuple[Any, list[st
             body,
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=_reject_constant,
+            parse_float=_parse_finite_float,
         )
     except ParseError:
         raise
@@ -389,15 +419,15 @@ _DICOM_ALLOWED_ENTRY_KEYS: frozenset[str] = frozenset({"vr", "Value"})
 _DICOM_SCALAR_TYPES: tuple[type, ...] = (str, int, float)
 
 
+# A valid tag is exactly eight ASCII hex digits. A strict regex is used rather than
+# int(tag, 16), which tolerates signs, underscores, and surrounding whitespace
+# (e.g. "+0000060" or "0008_060").
+_DICOM_TAG_RE = re.compile(r"^[0-9A-Fa-f]{8}$")
+
+
 def _is_dicom_tag(tag: str) -> bool:
-    """A tag is exactly eight hexadecimal digits (group + element)."""
-    if len(tag) != 8:
-        return False
-    try:
-        int(tag, 16)
-    except ValueError:
-        return False
-    return True
+    """A tag is exactly eight ASCII hexadecimal digits (group + element)."""
+    return _DICOM_TAG_RE.fullmatch(tag) is not None
 
 
 def _parse_dicom_json(

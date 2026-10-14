@@ -241,6 +241,65 @@ def test_parse_payload_rejects_nan_constant():
         parse_payload("json", "application/json", '{"x": NaN}', **_LIMITS)
 
 
+# ----------------------------------------- second review pass: runtime edge cases
+
+
+@pytest.mark.parametrize("tag", ["+0000060", "0008_060", " 0008060", "0008006"])
+def test_dicom_lenient_tag_forms_are_rejected(client, tag):
+    # int(tag, 16) tolerates signs/underscores/whitespace; the strict regex must not.
+    body = '{"' + tag + '": {"vr": "CS"}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_json_float_overflow_is_rejected(client):
+    assert _ingest(client, "json", "application/json", '{"x": 1e999}').status_code == 422
+
+
+def test_dicom_float_overflow_in_value_is_rejected(client):
+    body = '{"00200013": {"vr": "DS", "Value": [1e999]}}'
+    assert _ingest(client, "dicom", "application/dicom+json", body).status_code == 422
+
+
+def test_escaped_surrogate_inside_json_string_is_rejected(client):
+    # The body field is valid ASCII; the inner JSON decodes "\ud800" to a lone
+    # surrogate, which must be rejected rather than carried forward.
+    assert _ingest(client, "json", "application/json", '{"x": "\\ud800"}').status_code == 422
+
+
+def test_escaped_surrogate_in_object_key_is_rejected(client):
+    assert _ingest(client, "json", "application/json", '{"\\ud800": 1}').status_code == 422
+
+
+def test_parse_payload_rejects_float_overflow():
+    with pytest.raises(ParseError):
+        parse_payload("json", "application/json", '{"x": 1e999}', **_LIMITS)
+
+
+def test_parse_payload_rejects_escaped_surrogate():
+    with pytest.raises(ParseError):
+        parse_payload("json", "application/json", '{"x": "\\ud800"}', **_LIMITS)
+
+
+def test_validation_error_keeps_structured_shape_without_input(client):
+    secret = "CANARY-VALIDATE-7d2e"
+    # Invalid kind (fails the model pattern) carrying a secret in the rejected field.
+    response = _ingest(client, secret, "application/json", '{"a": 1}')
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert isinstance(detail, list) and detail
+    for item in detail:
+        assert set(item.keys()) == {"type", "loc", "msg"}
+        assert "input" not in item
+    assert secret not in response.text
+
+
+def test_other_routes_keep_structured_validation_errors(client):
+    # The custom handler must not break the HTTPValidationError contract elsewhere.
+    response = client.post("/api/v1/access/otp", json={"physician_id": "PHY-0001"})
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+
+
 # -------------------------------------------------- non-reflective error contract
 
 
