@@ -13,6 +13,7 @@ src/core/config.py              Settings
 src/models/schema.py            User, Project, Document, CrisisRecord, MerkleBlock
 src/services/crypto.py          Merkle root, block hash, chain verification
 src/services/access_control.py  OTP grants and glass-break
+src/services/parsing.py         Bounded JSON, XML, and DICOM JSON payload parsing
 src/api/routes/                 ingestion, access, audit
 src/main.py                     FastAPI application
 ```
@@ -57,6 +58,35 @@ curl -X POST http://127.0.0.1:8000/api/v1/ingest \
 
 Payloads that contain `PatientName` or a `<cpf>` element are rejected.
 
+#### Payload validation
+
+The endpoint parses `body` under conservative, fail-closed limits before storing it.
+Invalid, oversized, over-nested, or kind/media-type-mismatched input is rejected with
+HTTP 422 and a stable, non-reflective error that never echoes the submitted payload.
+
+`media_type` must be compatible with `kind`:
+
+| `kind`  | accepted `media_type`                       |
+| ------- | ------------------------------------------- |
+| `json`  | `application/json`                          |
+| `xml`   | `application/xml`, `text/xml` (alias)       |
+| `dicom` | `application/dicom+json`                    |
+
+* **JSON** must be syntactically valid, rooted at an object or array, and free of
+  duplicate object keys.
+* **XML** is parsed with DTDs, entity declarations, and external resource resolution
+  disabled; document type definitions and entity-expansion payloads are rejected.
+* **DICOM** is accepted only as a small DICOM JSON metadata subset: a single JSON
+  object whose keys are eight-hex-digit tags, each mapping to an object with a `vr`
+  string and an optional bounded `Value` array. `InlineBinary`, `BulkDataURI`, pixel
+  data (`7FE00010`), binary value representations, and DICOM Part 10 bytes are
+  rejected. This is deliberately not a DICOM conformance claim.
+
+`payload_sha256` is always computed over the original UTF-8 request body, so parser
+normalization never changes the digest. Limits are configurable via the
+`DATALIFE_INGEST_MAX_BODY_BYTES`, `DATALIFE_INGEST_MAX_DEPTH`,
+`DATALIFE_INGEST_MAX_NODES`, and `DATALIFE_INGEST_MAX_DICOM_VALUES` settings.
+
 ### Patient OTP
 
 ```bash
@@ -93,7 +123,7 @@ curl http://127.0.0.1:8000/api/v1/audit/verify
 
 ## Tests and Benchmarks
 
-Run routine unit and concurrency tests (`tests/test_merkle.py`, `tests/test_access.py`, `tests/test_concurrency.py`):
+Run routine unit and concurrency tests (`tests/test_merkle.py`, `tests/test_access.py`, `tests/test_concurrency.py`, `tests/test_ingestion_validation.py`):
 
 ```bash
 pytest -q
