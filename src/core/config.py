@@ -16,6 +16,13 @@ class Settings(BaseSettings):
     otp_ttl_seconds: int = 900
     master_physician_ids: str = "PHY-0001"
 
+    # Bounded parsing limits for the ingestion endpoint. Inputs that exceed any of
+    # these limits fail closed with HTTP 422 before expensive work is attempted.
+    ingest_max_body_bytes: int = 1_000_000
+    ingest_max_depth: int = 64
+    ingest_max_nodes: int = 10_000
+    ingest_max_dicom_values: int = 256
+
     def physician_ids(self) -> set[str]:
         return {item.strip() for item in self.master_physician_ids.split(",") if item.strip()}
 

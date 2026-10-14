@@ -8,6 +8,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from core.config import get_settings
+from services.parsing import ParseError, parse_payload
+
 router = APIRouter(prefix="/api/v1/ingest", tags=["ingestion"])
 
 _FORBIDDEN = {"name", "full_name", "cpf", "phone", "email", "emergency_contact"}
@@ -27,9 +30,31 @@ def reset_store() -> None:
 
 @router.post("")
 def ingest(payload: IngestRequest) -> dict[str, Any]:
+    # Retained structural rejection until the dedicated PII policy work lands. It runs
+    # on the raw body and never echoes it back.
     lowered = payload.body.lower()
     if any(field in lowered for field in ("<cpf>", "patientname")):
         raise HTTPException(status_code=422, detail="personal identifiers are not accepted by the lake tier")
+
+    # Parse the body under configured bounds. parse_payload fails closed on malformed,
+    # oversized, over-nested, or kind/media-type-mismatched input. The reason is a
+    # stable category string and is safe to surface without reflecting the payload.
+    settings = get_settings()
+    try:
+        parse_payload(
+            payload.kind,
+            payload.media_type,
+            payload.body,
+            max_body_bytes=settings.ingest_max_body_bytes,
+            max_depth=settings.ingest_max_depth,
+            max_nodes=settings.ingest_max_nodes,
+            max_dicom_values=settings.ingest_max_dicom_values,
+        )
+    except ParseError as exc:
+        raise HTTPException(status_code=422, detail=exc.reason) from exc
+
+    # Digest is computed over the original UTF-8 body so parser normalization cannot
+    # change the existing payload_sha256 contract.
     digest = hashlib.sha256(payload.body.encode("utf-8")).hexdigest()
     record = {
         "subject_key": payload.subject_key,
