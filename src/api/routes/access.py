@@ -33,7 +33,7 @@ class OtpCheck(BaseModel):
 class GlassBreakRequest(BaseModel):
     physician_id: str
     subject_key: str
-    reason: str
+    reason: str = Field(min_length=1, max_length=4000)
 
 
 def controller() -> AccessController:

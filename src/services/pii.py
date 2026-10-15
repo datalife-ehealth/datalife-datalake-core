@@ -117,16 +117,35 @@ def _key_category(name: str) -> str | None:
 
 # Unambiguous forms only. Each requires enough structure that ordinary clinical
 # numbers/codes do not match (see module docstring for the false-positive stance).
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-_CPF_RE = re.compile(r"\b\d{3}\.\d{3}\.\d{3}-\d{2}\b")
-_SSN_RE = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
-# Phone: optional +country and (area), then two digit groups split by a separator,
-# so a bare long number or a date does not trip it.
-_PHONE_RE = re.compile(r"(?:\+\d{1,3}[\s.\-]?)?(?:\(\d{2,3}\)[\s.\-]?)?\d{4,5}[\s.\-]\d{4}\b")
+#
+# Email: bounded, possessive quantifiers (``{m,n}+``) so there is no backtracking.
+# RFC-ish length caps (local <= 64, domain <= 255) keep matching strictly linear in
+# the input length, closing the quadratic/ReDoS risk on large inputs.
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]{1,64}+@(?:[A-Za-z0-9\-]{1,63}\.){1,8}+[A-Za-z]{2,24}+")
+_CPF_RE = re.compile(r"(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)")
+_SSN_RE = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
+# Phone: optional +country code and area (bare, or in parentheses), then an exchange
+# and a four-digit line, with separators between the groups. Requiring separators and
+# a trailing four-digit group keeps short clinical codes/dosages/dates from matching
+# while covering common US/international forms:
+#   202-555-0198   +1 (202) 555-0198   202 555 0198   +55 11 91234-5678   (11) 91234-5678
+# All quantifiers are bounded, so matching is linear.
+_PHONE_RE = re.compile(
+    r"(?<!\d)"
+    r"(?:\+\d{1,3}[\s.\-]?)?"
+    r"(?:\(\d{2,4}\)[\s.\-]?|\d{2,4}[\s.\-])"
+    r"\d{3,5}[\s.\-]\d{4}"
+    r"(?!\d)"
+)
 
 
 def _detect_value(text: str) -> str | None:
-    """Return a category if ``text`` contains an obvious identifier value."""
+    """Return a category if ``text`` contains an obvious identifier value.
+
+    All patterns are linear in ``len(text)`` (bounded/possessive quantifiers), so
+    this is safe to run on large values; callers additionally bound their inputs
+    (ingestion caps the body size and the glass-break reason is length-limited).
+    """
     if _EMAIL_RE.search(text):
         return "email"
     if _CPF_RE.search(text) or _SSN_RE.search(text):

@@ -8,13 +8,15 @@ values; negatives use realistic clinical content to guard against false positive
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
 from api.routes.access import audit_log, reset_access_store
 from api.routes.ingestion import reset_store
 from main import app
-from services.parsing import parse_payload
+from services.parsing import ParseError, parse_payload
 from services.pii import PiiFinding, scan_payload, scan_text
 
 _LIMITS = {"max_body_bytes": 100_000, "max_depth": 32, "max_nodes": 2_000, "max_dicom_values": 64}
@@ -214,3 +216,89 @@ def test_glass_break_accepts_clean_reason(client):
     )
     assert response.status_code == 200
     assert response.json()["state"] == "UNCONFIRMED"
+
+
+# -------------------------------------------- review follow-ups: bypass + DoS gaps
+
+
+@pytest.mark.parametrize(
+    "number",
+    [
+        "202-555-0198",
+        "+1 (202) 555-0198",
+        "202 555 0198",
+        "+55 11 91234-5678",
+        "(11) 91234-5678",
+    ],
+)
+def test_formatted_phone_numbers_are_detected(number):
+    findings = scan_text("call the family at " + number)
+    assert findings and findings[0].category == "phone"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "code 789-8",
+        "loinc 2160-0",
+        "dose 500 mg",
+        "collected 2024-03-15",
+        "hemoglobin 13.2",
+        "room 4 bed 2",
+    ],
+)
+def test_clinical_numbers_are_not_detected_as_phone(text):
+    assert scan_text(text) == []
+
+
+def test_glass_break_formatted_phone_is_rejected_and_not_logged_to_ledger(client):
+    before = len(audit_log())
+    number = "202-555-0198"
+    response = client.post(
+        "/api/v1/access/glass-break",
+        json={"physician_id": "PHY-0001", "subject_key": "subj-1", "reason": "call back " + number},
+    )
+    assert response.status_code == 422
+    assert number not in response.text
+    # Nothing appended, and the number is nowhere in the serialized audit chain.
+    assert len(audit_log()) == before
+    assert number not in repr(audit_log())
+
+
+def test_namespaced_attribute_collision_is_rejected_at_parse():
+    body = '<r xmlns:a="urn:a" xmlns:b="urn:b" a:contact="victim@example.com" b:contact="safe"/>'
+    with pytest.raises(ParseError):
+        parse_payload("xml", "application/xml", body, **_LIMITS)
+
+
+def test_namespaced_attribute_collision_payload_is_rejected_without_leak(client):
+    email = "victim@example.com"
+    body = '<r xmlns:a="urn:a" xmlns:b="urn:b" a:contact="' + email + '" b:contact="safe"/>'
+    response = _ingest(client, "xml", "application/xml", body)
+    assert response.status_code == 422
+    assert email not in response.text
+
+
+def test_single_namespaced_attribute_value_is_still_scanned():
+    body = '<r xmlns:a="urn:a" a:contact="person@example.com"/>'
+    findings = scan_payload(parse_payload("xml", "application/xml", body, **_LIMITS))
+    assert any(f.category == "email" for f in findings)
+
+
+def test_email_detection_is_linear_on_large_input():
+    # A long local-part-like run with no "@" previously backtracked quadratically.
+    # With bounded/possessive quantifiers it must stay fast and not match.
+    blob = "a" * 200_000
+    start = time.perf_counter()
+    result = scan_text(blob)
+    elapsed = time.perf_counter() - start
+    assert result == []
+    assert elapsed < 1.0
+
+
+def test_glass_break_reason_length_is_bounded(client):
+    response = client.post(
+        "/api/v1/access/glass-break",
+        json={"physician_id": "PHY-0001", "subject_key": "subj-1", "reason": "x" * 5000},
+    )
+    assert response.status_code == 422
