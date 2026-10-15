@@ -10,10 +10,13 @@ from pydantic import BaseModel, Field
 
 from core.config import get_settings
 from services.parsing import ParseError, parse_payload
+from services.pii import scan_payload
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["ingestion"])
 
-_FORBIDDEN = {"name", "full_name", "cpf", "phone", "email", "emergency_contact"}
+# One stable rejection message. The policy returns a category and safe field path for
+# diagnostics, but the response never reflects which value or payload fragment matched.
+_PII_REJECTED = "personal identifiers are not accepted by the lake tier"
 _STORE: list[dict[str, Any]] = []
 
 
@@ -38,7 +41,7 @@ def ingest(payload: IngestRequest) -> dict[str, Any]:
     # category string and is safe to surface without reflecting the payload.
     settings = get_settings()
     try:
-        parse_payload(
+        result = parse_payload(
             payload.kind,
             payload.media_type,
             payload.body,
@@ -50,11 +53,11 @@ def ingest(payload: IngestRequest) -> dict[str, Any]:
     except ParseError as exc:
         raise HTTPException(status_code=422, detail=exc.reason) from exc
 
-    # Retained structural rejection until the dedicated PII policy work lands. It runs
-    # on the raw body and never echoes it back.
-    lowered = payload.body.lower()
-    if any(field in lowered for field in ("<cpf>", "patientname")):
-        raise HTTPException(status_code=422, detail="personal identifiers are not accepted by the lake tier")
+    # Contextual PII policy over the normalized structure (nested keys, XML
+    # attributes/text, DICOM identity tags, and obvious identifier values). Runs
+    # before hashing/storing so no identity data is ever persisted or echoed back.
+    if scan_payload(result):
+        raise HTTPException(status_code=422, detail=_PII_REJECTED)
 
     # Digest is computed over the original UTF-8 body so parser normalization cannot
     # change the existing payload_sha256 contract.
