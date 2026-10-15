@@ -229,6 +229,7 @@ def test_glass_break_accepts_clean_reason(client):
         "202 555 0198",
         "+55 11 91234-5678",
         "(11) 91234-5678",
+        "+44 7911 123456",
     ],
 )
 def test_formatted_phone_numbers_are_detected(number):
@@ -245,10 +246,28 @@ def test_formatted_phone_numbers_are_detected(number):
         "collected 2024-03-15",
         "hemoglobin 13.2",
         "room 4 bed 2",
+        # dosage ranges and timestamp-adjacent IDs must not be read as phone numbers
+        "recorded 2024-03-15 123-4567",
+        "titration 500 250-1000 mg",
+        "insulin 10 250-1000 units",
+        "fluids 250-1000 ml",
     ],
 )
 def test_clinical_numbers_are_not_detected_as_phone(text):
     assert scan_text(text) == []
+
+
+def test_glass_break_international_phone_is_rejected_and_not_in_ledger(client):
+    before = len(audit_log())
+    number = "+44 7911 123456"
+    response = client.post(
+        "/api/v1/access/glass-break",
+        json={"physician_id": "PHY-0001", "subject_key": "subj-1", "reason": "ring " + number},
+    )
+    assert response.status_code == 422
+    assert number not in response.text
+    assert len(audit_log()) == before
+    assert number not in repr(audit_log())
 
 
 def test_glass_break_formatted_phone_is_rejected_and_not_logged_to_ledger(client):
