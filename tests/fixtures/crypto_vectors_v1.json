@@ -1,0 +1,256 @@
+{
+  "version": 1,
+  "description": "Cryptographic golden test vectors for canonical JSON and Merkle hashes. Invented synthetic test data only. Every vector change requires manual cryptographic review.",
+  "canonical_json_vectors": [
+    {
+      "id": "empty_object",
+      "description": "Empty object canonicalization",
+      "input": {},
+      "expected_utf8_hex": "7b7d",
+      "expected_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "id": "key_order_variant_a",
+      "description": "Key order test variant A (keys defined in alphabetical order)",
+      "input": {
+        "apple": "alpha",
+        "middle": 42,
+        "zebra": 100
+      },
+      "expected_utf8_hex": "7b226170706c65223a22616c706861222c226d6964646c65223a34322c227a65627261223a3130307d",
+      "expected_sha256": "3ce22e212044ec735da86f8486dcd9ccaf2b9e038f746814e31178c734e944c3"
+    },
+    {
+      "id": "key_order_variant_b",
+      "description": "Key order test variant B (keys defined in scrambled order, must produce identical bytes to variant A)",
+      "input": {
+        "zebra": 100,
+        "apple": "alpha",
+        "middle": 42
+      },
+      "expected_utf8_hex": "7b226170706c65223a22616c706861222c226d6964646c65223a34322c227a65627261223a3130307d",
+      "expected_sha256": "3ce22e212044ec735da86f8486dcd9ccaf2b9e038f746814e31178c734e944c3"
+    },
+    {
+      "id": "nested_structures",
+      "description": "Nested objects, arrays, boolean, and null primitives",
+      "input": {
+        "active": true,
+        "count": 10,
+        "data": null,
+        "flags": [
+          true,
+          false,
+          null
+        ],
+        "nested": {
+          "a": [
+            1,
+            2,
+            3
+          ],
+          "b": 2
+        }
+      },
+      "expected_utf8_hex": "7b22616374697665223a747275652c22636f756e74223a31302c2264617461223a6e756c6c2c22666c616773223a5b747275652c66616c73652c6e756c6c5d2c226e6573746564223a7b2261223a5b312c322c335d2c2262223a327d7d",
+      "expected_sha256": "8fd0fcedc8ac4007f5a128c7a749d8598b3f26f8a52ba612095ea635ac335678"
+    },
+    {
+      "id": "unicode_accents_and_scripts",
+      "description": "Unicode characters (Latin accents, Greek, kanji, section symbol) preserved in UTF-8",
+      "input": {
+        "accents": "na\u00efve caf\u00e9",
+        "greek": "\u03a9\u03bc\u03ad\u03b3\u03b1",
+        "kanji": "\u76e3\u67fb",
+        "section": "\u00a7"
+      },
+      "expected_utf8_hex": "7b22616363656e7473223a226e61c3af766520636166c3a9222c22677265656b223a22cea9cebcceadceb3ceb1222c226b616e6a69223a22e79ba3e69fbb222c2273656374696f6e223a22c2a7227d",
+      "expected_sha256": "692a89017373f59e9eeae5a076d4bdda64ebb5b647fc4659ad805d2919bb7529"
+    },
+    {
+      "id": "unicode_non_bmp",
+      "description": "Unicode non-BMP characters (emoji and biology symbols) preserved in UTF-8",
+      "input": {
+        "emoji": "\ud83d\udd2c",
+        "label": "laboratory",
+        "symbol": "\ud83e\uddec"
+      },
+      "expected_utf8_hex": "7b22656d6f6a69223a22f09f94ac222c226c6162656c223a226c61626f7261746f7279222c2273796d626f6c223a22f09fa7ac227d",
+      "expected_sha256": "fa0cd3644d8d9f01488571749d61df6c4ede82e75ae2d85559a98d8a4310dbc9"
+    },
+    {
+      "id": "unicode_precomposed_e_acute",
+      "description": "Precomposed e-acute (U+00E9); must differ in bytes and hash from decomposed variant",
+      "input": {
+        "label": "caf\u00e9"
+      },
+      "expected_utf8_hex": "7b226c6162656c223a22636166c3a9227d",
+      "expected_sha256": "2d7fba14f0a7cffed454bc268d791c0f32d11f62946998a323087ccf5df29075"
+    },
+    {
+      "id": "unicode_decomposed_e_acute",
+      "description": "Decomposed e + combining acute accent (U+0065 U+0301); must differ in bytes and hash from precomposed variant",
+      "input": {
+        "label": "cafe\u0301"
+      },
+      "expected_utf8_hex": "7b226c6162656c223a2263616665cc81227d",
+      "expected_sha256": "38b9723ab036c08537bb628922272d7e25deada9ae5ed1369b1828f6ec665536"
+    }
+  ],
+  "merkle_root_vectors": [
+    {
+      "id": "empty_records",
+      "description": "Empty record list produces sha256 of empty bytes",
+      "leaf_count": 0,
+      "records": [],
+      "expected_leaf_hashes": [],
+      "expected_merkle_root": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "single_leaf_record",
+      "description": "Single record (odd leaf count: 1) where root equals the leaf hash",
+      "leaf_count": 1,
+      "records": [
+        {
+          "id": "synth-rec-1",
+          "type": "AUDIT_EVENT",
+          "value": 100
+        }
+      ],
+      "expected_leaf_hashes": [
+        "a08e0915b2620a7235bf3ce7de2042df7c271173db2fa1a736394bfcadd6fae2"
+      ],
+      "expected_merkle_root": "a08e0915b2620a7235bf3ce7de2042df7c271173db2fa1a736394bfcadd6fae2"
+    },
+    {
+      "id": "two_leaf_records",
+      "description": "Two records (even leaf count: 2) combined via sha256(h0 + h1)",
+      "leaf_count": 2,
+      "records": [
+        {
+          "id": "synth-rec-1",
+          "type": "AUDIT_EVENT",
+          "value": 100
+        },
+        {
+          "id": "synth-rec-2",
+          "type": "AUDIT_EVENT",
+          "value": 200
+        }
+      ],
+      "expected_leaf_hashes": [
+        "a08e0915b2620a7235bf3ce7de2042df7c271173db2fa1a736394bfcadd6fae2",
+        "1ec7749fcfb4ecb10f516c02a8c5a89421a6b6895a1f06d51704078135e1e8dc"
+      ],
+      "expected_merkle_root": "5dbd47c388e5556435c06f0e3e248584bd73baecd92990dc32c25f1ad4ba2250"
+    },
+    {
+      "id": "three_leaf_records",
+      "description": "Three records (odd leaf count: 3) requiring duplication of the third leaf hash",
+      "leaf_count": 3,
+      "records": [
+        {
+          "id": "synth-rec-1",
+          "type": "AUDIT_EVENT",
+          "value": 100
+        },
+        {
+          "id": "synth-rec-2",
+          "type": "AUDIT_EVENT",
+          "value": 200
+        },
+        {
+          "id": "synth-rec-3",
+          "type": "AUDIT_EVENT",
+          "value": 300
+        }
+      ],
+      "expected_leaf_hashes": [
+        "a08e0915b2620a7235bf3ce7de2042df7c271173db2fa1a736394bfcadd6fae2",
+        "1ec7749fcfb4ecb10f516c02a8c5a89421a6b6895a1f06d51704078135e1e8dc",
+        "2f9708944d9ef4af1b1b16ac09442a8fcb7e5e462d24d4d233f8f53926dd70df"
+      ],
+      "expected_merkle_root": "42c35d17767e69e421eddf594d3d3b115744f83ec2b2926bae2c75fb3aacc72e"
+    },
+    {
+      "id": "four_leaf_records",
+      "description": "Four records (even leaf count: 4) forming a balanced 2-level binary tree",
+      "leaf_count": 4,
+      "records": [
+        {
+          "id": "synth-rec-1",
+          "type": "AUDIT_EVENT",
+          "value": 100
+        },
+        {
+          "id": "synth-rec-2",
+          "type": "AUDIT_EVENT",
+          "value": 200
+        },
+        {
+          "id": "synth-rec-3",
+          "type": "AUDIT_EVENT",
+          "value": 300
+        },
+        {
+          "id": "synth-rec-4",
+          "type": "AUDIT_EVENT",
+          "value": 400
+        }
+      ],
+      "expected_leaf_hashes": [
+        "a08e0915b2620a7235bf3ce7de2042df7c271173db2fa1a736394bfcadd6fae2",
+        "1ec7749fcfb4ecb10f516c02a8c5a89421a6b6895a1f06d51704078135e1e8dc",
+        "2f9708944d9ef4af1b1b16ac09442a8fcb7e5e462d24d4d233f8f53926dd70df",
+        "b9df4733b34f367902d0a6efb49ca64905ec551cf8a99252eb8daf675d7ef2f5"
+      ],
+      "expected_merkle_root": "9548ee930dd5fd75615625325fb74d0fbf344da6dad2a893e33ba00b8fceb5d7"
+    }
+  ],
+  "chain_vectors": [
+    {
+      "id": "two_block_chain",
+      "description": "Two-block sealed ledger chain demonstrating genesis Block 0 and linked Block 1",
+      "blocks": [
+        {
+          "height": 0,
+          "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+          "records": [
+            {
+              "action": "INIT_SYSTEM",
+              "code": 100
+            },
+            {
+              "action": "REGISTER_SCHEMA",
+              "code": 101
+            }
+          ],
+          "expected_merkle_root": "18d2a9a96ace2b0ac0fd0b7332fefac9021b77172bbb2cc42688069da67baea9",
+          "expected_canonical_payload_hex": "7b22686569676874223a302c226d65726b6c655f726f6f74223a2231386432613961393661636532623061633066643062373333326665666163393032316237373137326262623263633432363838303639646136376261656139222c2270726576696f75735f68617368223a2230303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030222c227265636f726473223a5b7b22616374696f6e223a22494e49545f53595354454d222c22636f6465223a3130307d2c7b22616374696f6e223a2252454749535445525f534348454d41222c22636f6465223a3130317d5d7d",
+          "expected_block_hash": "bf3ecaec78fbc660e774e882ccef1c8dda4bf3163f9f2bf0d9028ef51fd7396a"
+        },
+        {
+          "height": 1,
+          "previous_hash": "bf3ecaec78fbc660e774e882ccef1c8dda4bf3163f9f2bf0d9028ef51fd7396a",
+          "records": [
+            {
+              "action": "INGEST_RECORD",
+              "code": 201
+            },
+            {
+              "action": "VERIFY_POLICY",
+              "code": 202
+            },
+            {
+              "action": "ARCHIVE_RECORD",
+              "code": 203
+            }
+          ],
+          "expected_merkle_root": "5fe8d584a8944ae383075feb899da7339edd82963b11a15f82b19740d275779a",
+          "expected_canonical_payload_hex": "7b22686569676874223a312c226d65726b6c655f726f6f74223a2235666538643538346138393434616533383330373566656238393964613733333965646438323936336231316131356638326231393734306432373537373961222c2270726576696f75735f68617368223a2262663365636165633738666263363630653737346538383263636566316338646461346266333136336639663262663064393032386566353166643733393661222c227265636f726473223a5b7b22616374696f6e223a22494e474553545f5245434f5244222c22636f6465223a3230317d2c7b22616374696f6e223a225645524946595f504f4c494359222c22636f6465223a3230327d2c7b22616374696f6e223a22415243484956455f5245434f5244222c22636f6465223a3230337d5d7d",
+          "expected_block_hash": "f370afce5c7f4b0b336afcbee0faee817ea4f200b9821b01217983613a1c2a47"
+        }
+      ]
+    }
+  ]
+}

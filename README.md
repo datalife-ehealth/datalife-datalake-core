@@ -141,3 +141,21 @@ Optionally export machine-readable benchmark JSON results for CI tracking:
 ```bash
 pytest -m performance --benchmark-only --benchmark-json=benchmark_results.json
 ```
+
+### Cryptographic golden vectors
+
+Deterministic golden test vectors for canonical JSON encoding, leaf hashes, Merkle roots, and sealed ledger chains are committed in `tests/fixtures/crypto_vectors_v1.json`.
+
+Run the cryptographic vector test suite:
+
+```bash
+pytest -vv tests/test_crypto_vectors.py
+```
+
+An independent standard-library generator is provided for maintenance:
+
+```bash
+python scripts/generate_crypto_vectors.py --output tests/fixtures/crypto_vectors_v1.json
+```
+
+Every vector modification requires manual cryptographic review. Tests assert literal equality against committed fixture values and never regenerate expected values at runtime.
