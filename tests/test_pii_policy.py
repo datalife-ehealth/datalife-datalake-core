@@ -230,6 +230,7 @@ def test_glass_break_accepts_clean_reason(client):
         "+55 11 91234-5678",
         "(11) 91234-5678",
         "+44 7911 123456",
+        "+33 6 12 34 56 78",
     ],
 )
 def test_formatted_phone_numbers_are_detected(number):
@@ -251,6 +252,10 @@ def test_formatted_phone_numbers_are_detected(number):
         "titration 500 250-1000 mg",
         "insulin 10 250-1000 units",
         "fluids 250-1000 ml",
+        # spelled-out units and a backtrack-dodge attempt must also be rejected
+        "titration 500 250-1000 milligrams",
+        "give 20 milligrams",
+        "dose +1 20 30 mg",
     ],
 )
 def test_clinical_numbers_are_not_detected_as_phone(text):

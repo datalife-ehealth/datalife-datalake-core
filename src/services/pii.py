@@ -125,23 +125,27 @@ _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]{1,64}+@(?:[A-Za-z0-9\-]{1,63}\.){1,8}
 _CPF_RE = re.compile(r"(?<!\d)\d{3}\.\d{3}\.\d{3}-\d{2}(?!\d)")
 _SSN_RE = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
 # Phone: three accepted shapes, each bounded (so matching stays linear):
-#   * +country intl grouping    -> +1 (202) 555-0198, +55 11 91234-5678, +44 7911 123456
-#   * parenthesized area code   -> (11) 91234-5678
-#   * North American 3-3-4      -> 202-555-0198, 202 555 0198
+#   * +country intl grouping -> +1 (202) 555-0198, +55 11 91234-5678, +44 7911 123456,
+#                               +33 6 12 34 56 78 (the first group after the country
+#                               code may be a single digit)
+#   * parenthesized area code -> (11) 91234-5678
+#   * North American 3-3-4    -> 202-555-0198, 202 555 0198
 # To keep clinical text from matching, the start must not sit inside a larger
 # word/number/date (leading look-behind), the match must not run into more digits,
-# and it must not be immediately followed by a clinical unit (mg, ml, units, ...),
-# which is how dosage ranges (``500 250-1000 mg``) and ISO-date tails
-# (``2024-03-15 123-4567``) previously slipped through as false positives.
+# and it must not be immediately followed by a clinical unit -- abbreviated or
+# spelled out (mg, ml, units, milligrams, ...). The trailing digit groups are matched
+# possessively (``{0,4}+``) so the engine cannot backtrack to a shorter match that
+# dodges the unit guard (e.g. ``dose +1 20 30 mg``).
 _PHONE_RE = re.compile(
     r"(?<![\w\-/.])"
     r"(?:"
-    r"\+\d{1,3}(?:[\s.\-]?(?:\(\d{1,4}\)|\d{2,6})){1,4}"
-    r"|\(\d{1,4}\)[\s.\-]?\d{2,6}(?:[\s.\-]\d{2,6}){0,3}"
+    r"\+\d{1,3}[\s.\-]?(?:\(\d{1,4}\)|\d{1,4})(?:[\s.\-]?(?:\(\d{1,4}\)|\d{2,6})){0,4}+"
+    r"|\(\d{1,4}\)[\s.\-]?\d{2,6}(?:[\s.\-]\d{2,6}){0,3}+"
     r"|\d{3}[\s.\-]\d{3}[\s.\-]\d{4}"
     r")"
     r"(?!\d)"
-    r"(?![\s.\-]?(?:mg|mcg|ug|ml|dl|kg|g|units?|iu|mmol|mol|meq|bpm|mm|cm|hr|hrs|min|sec|kcal|cal)\b)",
+    r"(?![\s.\-]?(?:mg|mcg|ug|ml|dl|kg|g|units?|iu|mmol|mol|meq|bpm|mm|cm|hr|hrs|min|sec|kcal|cal"
+    r"|milligrams?|micrograms?|millilit(?:er|re)s?|grams?|liters?|litres?)\b)",
     re.I,
 )
 
