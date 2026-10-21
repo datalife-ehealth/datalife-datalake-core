@@ -256,6 +256,8 @@ def test_formatted_phone_numbers_are_detected(number):
         "titration 500 250-1000 milligrams",
         "give 20 milligrams",
         "dose +1 20 30 mg",
+        # too few digits to be a real phone number (E.164 needs ~7+)
+        "dose +1 20 30",
     ],
 )
 def test_clinical_numbers_are_not_detected_as_phone(text):

@@ -150,6 +150,13 @@ _PHONE_RE = re.compile(
 )
 
 
+# A phone-shaped token must carry at least this many digits to count. E.164 numbers
+# run ~7-15 digits, so this rejects short separated runs such as "+1 20 30" (which
+# otherwise matched the international branch) while still accepting real numbers like
+# "+44 7911 123456" or "+33 6 12 34 56 78".
+_MIN_PHONE_DIGITS = 7
+
+
 def _detect_value(text: str) -> str | None:
     """Return a category if ``text`` contains an obvious identifier value.
 
@@ -161,8 +168,11 @@ def _detect_value(text: str) -> str | None:
         return "email"
     if _CPF_RE.search(text) or _SSN_RE.search(text):
         return "government_id"
-    if _PHONE_RE.search(text):
-        return "phone"
+    # A phone-shaped match only counts once it clears the minimum digit length, so a
+    # short clinical sequence does not register while a real number elsewhere still can.
+    for match in _PHONE_RE.finditer(text):
+        if sum(char.isdigit() for char in match.group()) >= _MIN_PHONE_DIGITS:
+            return "phone"
     return None
 
 
