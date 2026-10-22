@@ -128,7 +128,9 @@ def test_xml_external_entity_is_rejected(client):
 
 
 def test_valid_dicom_json_subset_is_accepted(client):
-    body = '{"00080060": {"vr": "CS", "Value": ["MR"]}, "00100020": {"vr": "LO", "Value": ["anon-1"]}}'
+    # Uses non-identity tags only (Modality, StudyDate); patient-identity tags are
+    # rejected by the PII policy.
+    body = '{"00080060": {"vr": "CS", "Value": ["MR"]}, "00080020": {"vr": "DA", "Value": ["20240101"]}}'
     response = _ingest(client, "dicom", "application/dicom+json", body)
     assert response.status_code == 200
     assert response.json()["payload_sha256"] == hashlib.sha256(body.encode("utf-8")).hexdigest()

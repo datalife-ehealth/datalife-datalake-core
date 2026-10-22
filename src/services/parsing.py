@@ -117,6 +117,7 @@ _REASON_JSON_CONSTANT = "JSON must not contain NaN or Infinity values"
 _REASON_JSON_NONFINITE = "JSON numbers must be finite"
 _REASON_XML_SYNTAX = "payload is not well-formed XML"
 _REASON_XML_DTD = "XML document type definitions and entities are not accepted"
+_REASON_XML_ATTR_COLLISION = "XML attributes collide on local name after namespace removal"
 _REASON_DICOM_ROOT = "DICOM JSON metadata must be a single object of tags"
 _REASON_DICOM_TAG = "DICOM tag keys must be eight hexadecimal digits"
 _REASON_DICOM_ENTRY = "DICOM tag entry is malformed"
@@ -355,7 +356,16 @@ def _parse_xml(body: str, max_depth: int, max_nodes: int) -> tuple[XmlNode, list
         if len(stack) + 1 > max_depth:
             raise ParseError(_REASON_DEPTH)
         local = _local_name(name)
-        normalized_attrs = {_local_name(attr): val for attr, val in attributes.items()}
+        # Reducing namespaced attributes to bare local names can let two differently
+        # namespaced attributes (e.g. a:contact and b:contact) collapse onto one key,
+        # silently dropping a value that downstream policy would otherwise inspect.
+        # Fail closed on such a collision rather than lose a value.
+        normalized_attrs: dict[str, str] = {}
+        for attr, val in attributes.items():
+            attr_local = _local_name(attr)
+            if attr_local in normalized_attrs:
+                raise ParseError(_REASON_XML_ATTR_COLLISION)
+            normalized_attrs[attr_local] = val
         keys.append(local)
         keys.extend(normalized_attrs.keys())
         node = XmlNode(tag=local, attributes=normalized_attrs)

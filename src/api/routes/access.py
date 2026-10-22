@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from core.config import get_settings
 from services.access_control import AccessController
 from services.crypto import seal
+from services.pii import scan_text
 
 router = APIRouter(prefix="/api/v1/access", tags=["access"])
 _settings = get_settings()
@@ -32,7 +33,7 @@ class OtpCheck(BaseModel):
 class GlassBreakRequest(BaseModel):
     physician_id: str
     subject_key: str
-    reason: str
+    reason: str = Field(min_length=1, max_length=4000)
 
 
 def controller() -> AccessController:
@@ -74,6 +75,11 @@ def validate_otp(payload: OtpCheck) -> dict[str, bool]:
 
 @router.post("/glass-break")
 def glass_break(payload: GlassBreakRequest) -> dict[str, Any]:
+    # Reject direct identifiers in the free-text reason before issuing a grant or
+    # appending to the audit chain, so PII can never enter the ledger. subject_key and
+    # physician_id are opaque/configured values and are intentionally not scanned.
+    if scan_text(payload.reason):
+        raise HTTPException(status_code=422, detail="personal identifiers are not accepted in the reason field")
     try:
         grant = _controller.glass_break(payload.physician_id, payload.subject_key, payload.reason)
     except PermissionError as exc:

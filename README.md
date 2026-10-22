@@ -56,7 +56,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/ingest \
   -d "{\"subject_key\":\"subj-1\",\"kind\":\"xml\",\"media_type\":\"application/xml\",\"body\":\"<Panel><Hemoglobin value=\\\"13.2\\\"/></Panel>\"}"
 ```
 
-Payloads that contain `PatientName` or a `<cpf>` element are rejected.
+Payloads carrying direct patient identifiers are rejected (see PII policy below).
 
 #### Payload validation
 
@@ -81,6 +81,25 @@ HTTP 422 and a stable, non-reflective error that never echoes the submitted payl
   string and an optional bounded `Value` array. `InlineBinary`, `BulkDataURI`, pixel
   data (`7FE00010`), binary value representations, and DICOM Part 10 bytes are
   rejected. This is deliberately not a DICOM conformance claim.
+
+#### PII policy
+
+A centralized policy (`src/services/pii.py`) rejects direct patient identity data at
+the boundary. It traverses the normalized parser output rather than the raw body:
+nested JSON keys and string values, XML element/attribute names and text, and the
+DICOM patient-identity tags (for example `PatientName`, `PatientID`,
+`PatientBirthDate`, `PatientAddress`). Field names are matched against an explicit set
+of identity concepts (name, government ID/CPF, phone, email, address, date of birth,
+emergency contact) after normalizing case and separators. Values are matched only by
+conservative detectors for unambiguous email, government-ID (CPF/SSN), and formatted
+phone forms. The glass-break `reason` free-text field is scanned the same way before
+anything is written to the audit ledger.
+
+Rejections return a single stable HTTP 422 and never echo the matched value or
+payload into the response, logs, or audit events. The detectors are intentionally
+narrow to avoid flagging clinical codes, measurements, and dates; this is boundary
+rejection, not de-identification, and makes no anonymization claim. `subject_key`,
+server-issued tokens, and configured `physician_id` values are not scanned.
 
 `payload_sha256` is always computed over the original UTF-8 request body, so parser
 normalization never changes the digest. Limits are configurable via the
