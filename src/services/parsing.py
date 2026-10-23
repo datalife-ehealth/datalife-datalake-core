@@ -101,7 +101,7 @@ class XmlNode:
     tag: str
     attributes: dict[str, str]
     text: str = ""
-    children: list["XmlNode"] = field(default_factory=list)
+    children: list[XmlNode] = field(default_factory=list)
 
 
 # Reason codes. Kept coarse and input-free on purpose.

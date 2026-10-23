@@ -113,19 +113,58 @@ def test_conflicting_insert_rolls_back_without_partial_row():
             object_key="a" * 32,
         )
     # A raw duplicate that bypasses the idempotent guard must fail and roll back.
-    with pytest.raises(IntegrityError):
-        with session_scope() as session:
-            session.add(
-                Document(
-                    subject_key="subj-conf",
-                    kind="json",
-                    media_type="application/json",
-                    payload_sha256="a" * 64,
-                    object_key="a" * 32,
-                )
+    with pytest.raises(IntegrityError), session_scope() as session:
+        session.add(
+            Document(
+                subject_key="subj-conf",
+                kind="json",
+                media_type="application/json",
+                payload_sha256="a" * 64,
+                object_key="a" * 32,
             )
-            session.flush()
+        )
+        session.flush()
     assert _count("subj-conf") == 1
+
+
+def test_insert_recovers_from_unique_violation_and_returns_existing_row(monkeypatch):
+    # Pre-existing committed row (the "winner" of a concurrent race).
+    with session_scope() as session:
+        documents_service.insert_document(
+            session,
+            subject_key="subj-race",
+            kind="json",
+            media_type="application/json",
+            payload_sha256="f" * 64,
+            object_key="f" * 32,
+        )
+
+    # Force the up-front existence check to miss so the flush hits the unique
+    # constraint, simulating two callers that both passed the read before either
+    # committed. The recovery path must roll back and return the committed row.
+    real_lookup = documents_service.get_by_subject_and_object
+    calls = {"n": 0}
+
+    def fake_lookup(session, subject_key, object_key):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return real_lookup(session, subject_key, object_key)
+
+    monkeypatch.setattr(documents_service, "get_by_subject_and_object", fake_lookup)
+
+    with session_scope() as session:
+        record, created = documents_service.insert_document(
+            session,
+            subject_key="subj-race",
+            kind="json",
+            media_type="application/json",
+            payload_sha256="f" * 64,
+            object_key="f" * 32,
+        )
+    assert created is False
+    assert record["object_key"] == "f" * 32
+    assert _count("subj-race") == 1
 
 
 def test_no_raw_body_or_identity_field_is_persisted(client):

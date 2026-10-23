@@ -7,11 +7,11 @@ import threading
 import time
 from typing import Any
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 
-from api.routes.access import audit_log, reset_access_store
 import api.routes.access as access_module
+from api.routes.access import audit_log, reset_access_store
 from main import app
 from services.crypto import verify_chain
 

@@ -1,7 +1,7 @@
 """FastAPI entrypoint for the DataLife data lake core."""
 
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError

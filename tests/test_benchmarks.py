@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from services.crypto import leaf_hash, merkle_root, seal, verify_chain
+from services.crypto import merkle_root, seal, verify_chain
 
 
 def _generate_deterministic_records(count: int, seed: int = 42) -> list[dict[str, Any]]:

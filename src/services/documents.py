@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from models.schema import Document
@@ -46,9 +47,13 @@ def insert_document(
 
     Re-ingesting identical content for the same subject returns the existing row
     rather than creating a duplicate or overwriting it. Returns ``(record, created)``
-    where ``created`` is ``False`` for the idempotent hit. The insert is flushed so a
-    unique-constraint violation surfaces inside the caller's transaction (and can be
-    mapped to a conflict) instead of at a later, ambiguous point.
+    where ``created`` is ``False`` for the idempotent hit.
+
+    The up-front read handles the common sequential case. Two concurrent inserts can
+    still both pass that read, so the flush is additionally guarded: on a unique
+    violation we roll back, re-read the now-committed row, and return it. This makes
+    the endpoint idempotent under concurrent retries (both callers get the same row)
+    instead of one winning and the other getting a conflict.
     """
     existing = get_by_subject_and_object(session, subject_key, object_key)
     if existing is not None:
@@ -63,7 +68,17 @@ def insert_document(
         project_id=project_id,
     )
     session.add(document)
-    session.flush()
+    try:
+        session.flush()
+    except IntegrityError:
+        # Lost the (subject_key, object_key) race. Drop our pending insert and return
+        # the row the winning transaction committed. If nothing is found the violation
+        # was something else, so re-raise rather than masking it.
+        session.rollback()
+        winner = get_by_subject_and_object(session, subject_key, object_key)
+        if winner is None:
+            raise
+        return _to_dict(winner), False
     return _to_dict(document), True
 
 

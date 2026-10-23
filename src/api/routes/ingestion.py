@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.config import get_settings
@@ -17,6 +16,10 @@ from services.parsing import ParseError, parse_payload
 from services.pii import scan_payload
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["ingestion"])
+
+# Session is injected via Annotated (not a Depends() default) to keep the signature
+# lint-clean while still resolving per request.
+SessionDep = Annotated[Session, Depends(get_session)]
 
 # One stable rejection message. The policy returns a category and safe field path for
 # diagnostics, but the response never reflects which value or payload fragment matched.
@@ -37,7 +40,7 @@ def reset_store() -> None:
 
 
 @router.post("")
-def ingest(payload: IngestRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
+def ingest(payload: IngestRequest, session: SessionDep) -> dict[str, Any]:
     # Parse the body under configured bounds first. parse_payload fails closed on
     # malformed, oversized, non-UTF-8, over-nested, or kind/media-type-mismatched
     # input. Running it before the PII scan below means the size and encoding checks
@@ -68,23 +71,21 @@ def ingest(payload: IngestRequest, session: Session = Depends(get_session)) -> d
     # change the existing payload_sha256 contract. Only metadata is persisted; the
     # raw body never reaches the database.
     digest = hashlib.sha256(payload.body.encode("utf-8")).hexdigest()
-    try:
-        record, _created = documents_service.insert_document(
-            session,
-            subject_key=payload.subject_key,
-            kind=payload.kind,
-            media_type=payload.media_type,
-            payload_sha256=digest,
-            object_key=digest[:32],
-        )
-    except IntegrityError as exc:
-        # A concurrent insert won the (subject_key, object_key) race. Fail closed with
-        # a conflict rather than overwriting; the session dependency rolls back.
-        raise HTTPException(status_code=409, detail="document already exists") from exc
+    # insert_document is idempotent per (subject_key, object_key), including under
+    # concurrent retries, so re-ingesting identical content returns the existing row
+    # with a consistent 200 rather than a conflict.
+    record, _created = documents_service.insert_document(
+        session,
+        subject_key=payload.subject_key,
+        kind=payload.kind,
+        media_type=payload.media_type,
+        payload_sha256=digest,
+        object_key=digest[:32],
+    )
     return record
 
 
 @router.get("")
-def list_documents(subject_key: str, session: Session = Depends(get_session)) -> dict[str, Any]:
+def list_documents(subject_key: str, session: SessionDep) -> dict[str, Any]:
     rows = documents_service.list_by_subject(session, subject_key)
     return {"documents": rows, "count": len(rows)}

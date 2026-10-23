@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from services.parsing import PayloadKind, ParseResult, XmlNode
+from services.parsing import ParseResult, PayloadKind, XmlNode
 
 
 @dataclass(frozen=True)
@@ -146,7 +146,7 @@ _PHONE_RE = re.compile(
     r"(?!\d)"
     r"(?![\s.\-]?(?:mg|mcg|ug|ml|dl|kg|g|units?|iu|mmol|mol|meq|bpm|mm|cm|hr|hrs|min|sec|kcal|cal"
     r"|milligrams?|micrograms?|millilit(?:er|re)s?|grams?|liters?|litres?)\b)",
-    re.I,
+    re.IGNORECASE,
 )
 
 
