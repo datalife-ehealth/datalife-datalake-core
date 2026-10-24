@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import hmac
 import secrets
 import threading
 import time
-from typing import Callable
+from collections.abc import Callable
+from dataclasses import dataclass
 
 
 @dataclass
@@ -36,7 +36,7 @@ class AccessController:
             raise ValueError("ttl_seconds must be positive")
         issued = float(self._now())
         raw = secrets.token_hex(16)
-        token = hmac.new(self._secret, f"{subject_key}|{physician_id}|{raw}".encode("utf-8"), hashlib.sha256).hexdigest()
+        token = hmac.new(self._secret, f"{subject_key}|{physician_id}|{raw}".encode(), hashlib.sha256).hexdigest()
         grant = AccessGrant(token, subject_key, physician_id, issued, issued + ttl_seconds, "OTP")
         with self._lock:
             self._grants[token] = grant
@@ -49,9 +49,7 @@ class AccessController:
             return False
         if grant.subject_key != subject_key:
             return False
-        if self._now() >= grant.expires_at:
-            return False
-        return True
+        return self._now() < grant.expires_at
 
     def glass_break(self, physician_id: str, subject_key: str, reason: str) -> AccessGrant:
         if physician_id not in self._physicians:
@@ -59,7 +57,7 @@ class AccessController:
         if not reason.strip():
             raise ValueError("reason is required")
         issued = float(self._now())
-        token = hmac.new(self._secret, f"glass|{physician_id}|{subject_key}|{issued}|{reason}".encode("utf-8"), hashlib.sha256).hexdigest()
+        token = hmac.new(self._secret, f"glass|{physician_id}|{subject_key}|{issued}|{reason}".encode(), hashlib.sha256).hexdigest()
         grant = AccessGrant(token, subject_key, physician_id, issued, issued + 3600, "GLASS_BREAK")
         with self._lock:
             self._grants[token] = grant

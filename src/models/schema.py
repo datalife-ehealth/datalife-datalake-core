@@ -6,7 +6,7 @@ The personal tier (name, CPF, phone, emergency contacts) is intentionally absent
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -32,12 +32,18 @@ class Project(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    # object_key is a content address (payload digest prefix). The same synthetic
+    # content may legitimately be ingested under different opaque subject_keys, so
+    # uniqueness is scoped to the (subject_key, object_key) pair instead of being
+    # global. This also gives duplicate ingests for one subject a deterministic,
+    # idempotent identity rather than a hard global collision.
+    __table_args__ = (UniqueConstraint("subject_key", "object_key", name="uq_documents_subject_object"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     subject_key: Mapped[str] = mapped_column(String(64), index=True)
     project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True)
     kind: Mapped[str] = mapped_column(String(32))
-    object_key: Mapped[str] = mapped_column(String(128), unique=True)
+    object_key: Mapped[str] = mapped_column(String(128), index=True)
     payload_sha256: Mapped[str] = mapped_column(String(64))
     media_type: Mapped[str] = mapped_column(String(80), default="application/json")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

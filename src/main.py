@@ -1,10 +1,24 @@
 """FastAPI entrypoint for the DataLife data lake core."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from api.routes import access, audit, ingestion
+from core.database import create_all
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Development bootstrap of the document-metadata schema. This is not a migration
+    # strategy; a migration tool (e.g. Alembic) can replace it later without changing
+    # the runtime wiring.
+    create_all()
+    yield
+
 
 app = FastAPI(
     title="DataLife Data Lake Core",
@@ -16,6 +30,7 @@ app = FastAPI(
     ),
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 @app.exception_handler(RequestValidationError)
