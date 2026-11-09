@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import hmac
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
+
+from services.crypto import canonical_json, sha256_hex
 
 CONTRACT_VERSION = "1.0"
 SUPPORTED_VERSION: tuple[int, int] = (1, 0)
@@ -59,6 +63,7 @@ _DEIDENTIFICATION_FIELDS = (
 )
 _POLICY_FLAGS = ("direct_identifiers_removed", "subject_key_pseudonymous")
 _TABLE_FIELDS = ("name", "location", "row_count", "columns", "sha256")
+_ROOT_PATH = "$"
 
 
 @dataclass(frozen=True)
@@ -89,6 +94,55 @@ def is_compatible(
     return parsed[0] == supported[0] and parsed[1] <= supported[1]
 
 
+def compute_table_digest(rows: list[Any]) -> str:
+    return sha256_hex(canonical_json(rows))
+
+
+def validate_manifest(
+    data: Mapping[str, Any], *, table_digests: Mapping[str, str] | None = None
+) -> list[ManifestError]:
+    found: dict[str, ManifestError] = {}
+    if not isinstance(data, Mapping):
+        _record(found, "not_object", "manifest")
+        return sorted(found.values(), key=lambda error: (error.path, error.code))
+    digests = table_digests if isinstance(table_digests, Mapping) else None
+    _check_keys(data, "", _TOP_LEVEL_FIELDS, found)
+    _check_contract_version(data, found)
+    _check_release_id(data, found)
+    _check_deidentification(data, found)
+    _check_tables(data, digests, found)
+    return sorted(found.values(), key=lambda error: (error.path, error.code))
+
+
+def validate_manifest_bytes(
+    raw: bytes, *, table_digests: Mapping[str, str] | None = None
+) -> list[ManifestError]:
+    data, errors = load_manifest(raw)
+    if data is None:
+        return errors
+    return validate_manifest(data, table_digests=table_digests)
+
+
+def load_manifest(
+    raw: bytes,
+) -> tuple[dict[str, Any] | None, list[ManifestError]]:
+    if not isinstance(raw, (bytes, bytearray)):
+        return None, [ManifestError("invalid_json", _ROOT_PATH)]
+    if len(raw) > MAX_MANIFEST_BYTES:
+        return None, [ManifestError("too_large", _ROOT_PATH)]
+    try:
+        document = json.loads(
+            bytes(raw).decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_constant,
+        )
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        return None, [ManifestError("invalid_json", _ROOT_PATH)]
+    if not isinstance(document, dict):
+        return None, [ManifestError("not_object", _ROOT_PATH)]
+    return document, []
+
+
 def _record(found: dict[str, ManifestError], code: str, path: str) -> None:
     if path not in found:
         found[path] = ManifestError(code, path)
@@ -98,6 +152,19 @@ def _join(prefix: str, key: str) -> str:
     if prefix == "":
         return key
     return f"{prefix}.{key}"
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError
+        result[key] = value
+    return result
+
+
+def _reject_constant(_: str) -> Any:
+    raise ValueError
 
 
 def _check_keys(
@@ -202,10 +269,26 @@ def _check_columns(
         seen.add(column)
 
 
+def _check_table_digest(
+    name: str,
+    digest: str,
+    digests: Mapping[str, str],
+    path: str,
+    found: dict[str, ManifestError],
+) -> None:
+    expected = digests.get(name)
+    if not isinstance(expected, str) or not expected.isascii():
+        _record(found, "hash_mismatch", path)
+        return
+    if not hmac.compare_digest(expected, digest):
+        _record(found, "hash_mismatch", path)
+
+
 def _check_table(
     table: Any,
     index: int,
     seen_names: set[str],
+    digests: Mapping[str, str] | None,
     found: dict[str, ManifestError],
 ) -> None:
     base = f"tables[{index}]"
@@ -213,17 +296,19 @@ def _check_table(
         _record(found, "invalid_type", base)
         return
     _check_keys(table, base, _TABLE_FIELDS, found)
+    name: str | None = None
     if "name" in table:
-        name = table["name"]
+        value = table["name"]
         path = _join(base, "name")
-        if not isinstance(name, str):
+        if not isinstance(value, str):
             _record(found, "invalid_type", path)
-        elif _NAME_PATTERN.fullmatch(name) is None:
+        elif _NAME_PATTERN.fullmatch(value) is None:
             _record(found, "invalid_format", path)
-        elif name in seen_names:
+        elif value in seen_names:
             _record(found, "duplicate_table", path)
         else:
-            seen_names.add(name)
+            seen_names.add(value)
+            name = value
     if "location" in table and not isinstance(table["location"], str):
         _record(found, "invalid_type", _join(base, "location"))
     if "row_count" in table:
@@ -234,17 +319,26 @@ def _check_table(
         elif row_count < 0 or row_count > MAX_ROW_COUNT:
             _record(found, "invalid_row_count", path)
     _check_columns(table, base, found)
+    digest: str | None = None
     if "sha256" in table:
-        digest = table["sha256"]
+        value = table["sha256"]
         path = _join(base, "sha256")
-        if not isinstance(digest, str):
+        if not isinstance(value, str):
             _record(found, "invalid_type", path)
-        elif _DIGEST_PATTERN.fullmatch(digest) is None:
+        elif _DIGEST_PATTERN.fullmatch(value) is None:
             _record(found, "invalid_format", path)
+        else:
+            digest = value
+    if digests is not None and name is not None and digest is not None:
+        _check_table_digest(
+            name, digest, digests, _join(base, "sha256"), found
+        )
 
 
 def _check_tables(
-    data: Mapping[str, Any], found: dict[str, ManifestError]
+    data: Mapping[str, Any],
+    digests: Mapping[str, str] | None,
+    found: dict[str, ManifestError],
 ) -> None:
     if "tables" not in data:
         return
@@ -260,19 +354,4 @@ def _check_tables(
         return
     seen_names: set[str] = set()
     for index, table in enumerate(value):
-        _check_table(table, index, seen_names, found)
-
-
-def validate_manifest(
-    data: Mapping[str, Any], *, table_digests: Mapping[str, str] | None = None
-) -> list[ManifestError]:
-    found: dict[str, ManifestError] = {}
-    if not isinstance(data, Mapping):
-        _record(found, "not_object", "manifest")
-        return sorted(found.values(), key=lambda error: (error.path, error.code))
-    _check_keys(data, "", _TOP_LEVEL_FIELDS, found)
-    _check_contract_version(data, found)
-    _check_release_id(data, found)
-    _check_deidentification(data, found)
-    _check_tables(data, found)
-    return sorted(found.values(), key=lambda error: (error.path, error.code))
+        _check_table(table, index, seen_names, digests, found)
