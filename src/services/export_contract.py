@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import argparse
 import hmac
 import json
 import re
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from services.crypto import canonical_json, sha256_hex
@@ -141,6 +144,50 @@ def load_manifest(
     if not isinstance(document, dict):
         return None, [ManifestError("not_object", _ROOT_PATH)]
     return document, []
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="python -m services.export_contract")
+    parser.add_argument("manifest")
+    parser.add_argument("--digests")
+    args = parser.parse_args(argv)
+    try:
+        raw = Path(args.manifest).read_bytes()
+    except (OSError, ValueError):
+        print("unreadable input", file=sys.stderr)
+        return 2
+    digests: dict[str, str] | None = None
+    if args.digests is not None:
+        try:
+            digests = _read_digests(Path(args.digests).read_bytes())
+        except (OSError, ValueError):
+            print("unreadable input", file=sys.stderr)
+            return 2
+        if digests is None:
+            print("unreadable input", file=sys.stderr)
+            return 2
+    errors = validate_manifest_bytes(raw, table_digests=digests)
+    if not errors:
+        print("ok")
+        return 0
+    for error in errors:
+        print(format_error(error))
+    return 1
+
+
+def _read_digests(raw: bytes) -> dict[str, str] | None:
+    try:
+        document = json.loads(raw.decode("utf-8"))
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        return None
+    if not isinstance(document, dict):
+        return None
+    digests: dict[str, str] = {}
+    for key, value in document.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            return None
+        digests[key] = value
+    return digests
 
 
 def _record(found: dict[str, ManifestError], code: str, path: str) -> None:
@@ -355,3 +402,7 @@ def _check_tables(
     seen_names: set[str] = set()
     for index, table in enumerate(value):
         _check_table(table, index, seen_names, digests, found)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
