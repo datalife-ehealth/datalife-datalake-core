@@ -57,6 +57,46 @@ _RELEASE_ID_PATTERN = re.compile(r"rel-[0-9]{4}-[0-9]{4}")
 _POLICY_VERSION_PATTERN = re.compile(r"[1-9][0-9]{0,3}")
 _NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
+_NON_ALNUM_PATTERN = re.compile(r"[^a-z0-9]+")
+
+_IDENTITY_COLUMNS = frozenset(
+    {
+        "fullname",
+        "firstname",
+        "lastname",
+        "middlename",
+        "name",
+        "patientname",
+        "patientid",
+        "patientidentifier",
+        "mrn",
+        "medicalrecordnumber",
+        "email",
+        "emailaddress",
+        "cpf",
+        "ssn",
+        "nationalid",
+        "dateofbirth",
+        "dob",
+        "birthdate",
+        "phone",
+        "phonenumber",
+        "telephone",
+        "address",
+        "homeaddress",
+        "emergencycontact",
+    }
+)
+
+_REFERENCE_COLUMNS = frozenset(
+    {
+        "objectkey",
+        "payloadsha256",
+        "token",
+        "granttoken",
+        "otp",
+    }
+)
 
 _TOP_LEVEL_FIELDS = ("contract_version", "release_id", "deidentification", "tables")
 _DEIDENTIFICATION_FIELDS = (
@@ -67,6 +107,7 @@ _DEIDENTIFICATION_FIELDS = (
 _POLICY_FLAGS = ("direct_identifiers_removed", "subject_key_pseudonymous")
 _TABLE_FIELDS = ("name", "location", "row_count", "columns", "sha256")
 _ROOT_PATH = "$"
+_UNREADABLE = "error: unreadable input"
 
 
 @dataclass(frozen=True)
@@ -109,11 +150,12 @@ def validate_manifest(
         _record(found, "not_object", "manifest")
         return sorted(found.values(), key=lambda error: (error.path, error.code))
     digests = table_digests if isinstance(table_digests, Mapping) else None
+    release_id = _valid_release_id(data)
     _check_keys(data, "", _TOP_LEVEL_FIELDS, found)
     _check_contract_version(data, found)
     _check_release_id(data, found)
     _check_deidentification(data, found)
-    _check_tables(data, digests, found)
+    _check_tables(data, digests, release_id, found)
     return sorted(found.values(), key=lambda error: (error.path, error.code))
 
 
@@ -154,17 +196,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         raw = Path(args.manifest).read_bytes()
     except (OSError, ValueError):
-        print("unreadable input", file=sys.stderr)
+        print(_UNREADABLE, file=sys.stderr)
         return 2
     digests: dict[str, str] | None = None
     if args.digests is not None:
         try:
             digests = _read_digests(Path(args.digests).read_bytes())
         except (OSError, ValueError):
-            print("unreadable input", file=sys.stderr)
+            print(_UNREADABLE, file=sys.stderr)
             return 2
         if digests is None:
-            print("unreadable input", file=sys.stderr)
+            print(_UNREADABLE, file=sys.stderr)
             return 2
     errors = validate_manifest_bytes(raw, table_digests=digests)
     if not errors:
@@ -212,6 +254,33 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 def _reject_constant(_: str) -> Any:
     raise ValueError
+
+
+def _normalize_key(value: str) -> str:
+    return _NON_ALNUM_PATTERN.sub("", value.lower())
+
+
+def _is_forbidden_identity(value: str) -> bool:
+    return _normalize_key(value) in _IDENTITY_COLUMNS
+
+
+def _is_reference_value(value: str) -> bool:
+    return value.startswith("/") or "://" in value
+
+
+def _is_forbidden_reference(value: str) -> bool:
+    if _normalize_key(value) in _REFERENCE_COLUMNS:
+        return True
+    return _is_reference_value(value)
+
+
+def _valid_release_id(data: Mapping[str, Any]) -> str | None:
+    value = data.get("release_id")
+    if not isinstance(value, str):
+        return None
+    if _RELEASE_ID_PATTERN.fullmatch(value) is None:
+        return None
+    return value
 
 
 def _check_keys(
@@ -307,6 +376,12 @@ def _check_columns(
         if not isinstance(column, str):
             _record(found, "invalid_type", column_path)
             continue
+        if _is_forbidden_identity(column):
+            _record(found, "forbidden_identity_field", column_path)
+            continue
+        if _is_forbidden_reference(column):
+            _record(found, "forbidden_reference", column_path)
+            continue
         if _NAME_PATTERN.fullmatch(column) is None:
             _record(found, "invalid_format", column_path)
             continue
@@ -314,6 +389,23 @@ def _check_columns(
             _record(found, "duplicate_column", column_path)
             continue
         seen.add(column)
+
+
+def _check_location(
+    value: str,
+    base: str,
+    name: str | None,
+    release_id: str | None,
+    found: dict[str, ManifestError],
+) -> None:
+    path = _join(base, "location")
+    if _is_reference_value(value):
+        _record(found, "forbidden_reference", path)
+        return
+    if name is None or release_id is None:
+        return
+    if value != f"releases/{release_id}/{name}.jsonl":
+        _record(found, "unapproved_location", path)
 
 
 def _check_table_digest(
@@ -336,6 +428,7 @@ def _check_table(
     index: int,
     seen_names: set[str],
     digests: Mapping[str, str] | None,
+    release_id: str | None,
     found: dict[str, ManifestError],
 ) -> None:
     base = f"tables[{index}]"
@@ -356,8 +449,12 @@ def _check_table(
         else:
             seen_names.add(value)
             name = value
-    if "location" in table and not isinstance(table["location"], str):
-        _record(found, "invalid_type", _join(base, "location"))
+    if "location" in table:
+        location = table["location"]
+        if not isinstance(location, str):
+            _record(found, "invalid_type", _join(base, "location"))
+        else:
+            _check_location(location, base, name, release_id, found)
     if "row_count" in table:
         row_count = table["row_count"]
         path = _join(base, "row_count")
@@ -377,14 +474,13 @@ def _check_table(
         else:
             digest = value
     if digests is not None and name is not None and digest is not None:
-        _check_table_digest(
-            name, digest, digests, _join(base, "sha256"), found
-        )
+        _check_table_digest(name, digest, digests, _join(base, "sha256"), found)
 
 
 def _check_tables(
     data: Mapping[str, Any],
     digests: Mapping[str, str] | None,
+    release_id: str | None,
     found: dict[str, ManifestError],
 ) -> None:
     if "tables" not in data:
@@ -401,7 +497,7 @@ def _check_tables(
         return
     seen_names: set[str] = set()
     for index, table in enumerate(value):
-        _check_table(table, index, seen_names, digests, found)
+        _check_table(table, index, seen_names, digests, release_id, found)
 
 
 if __name__ == "__main__":
