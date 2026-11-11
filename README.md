@@ -156,10 +156,10 @@ Required fields:
 * `tables`: one entry per released table, each with `name`, `location`,
   `row_count`, `columns`, and `sha256`.
 
-Compatibility follows `MAJOR.MINOR`. Any minor at or below the supported minor
-of the same major is accepted, so `1.0` is valid and a later `1.x` still
-validates. A different major, or a version that is not `MAJOR.MINOR`, is
-rejected as incompatible.
+Compatibility follows `MAJOR.MINOR`. A manifest is accepted when its major
+version matches the supported major and its minor is at or below the supported
+minor. A different major, a newer minor, or a version that is not `MAJOR.MINOR`
+is rejected.
 
 The handoff boundary is strict. Consumers read released files and the manifest
 only. They must never read transactional tables or call `/api/v1` routes, and
@@ -168,7 +168,7 @@ the manifest deliberately carries no such references.
 Validate a manifest before consuming a release:
 
 ```bash
-python -m services.export_contract tests/fixtures/export_manifest_v1.json
+PYTHONPATH=src python -m services.export_contract tests/fixtures/export_manifest_v1.json
 ```
 
 Exit codes: `0` means the manifest is valid, `1` means validation found
