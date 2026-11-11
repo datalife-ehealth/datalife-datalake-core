@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from services.crypto import canonical_json, sha256_hex
+from services.pii import _key_category
 
 CONTRACT_VERSION = "1.0"
 SUPPORTED_VERSION: tuple[int, int] = (1, 0)
@@ -58,35 +59,6 @@ _POLICY_VERSION_PATTERN = re.compile(r"[1-9][0-9]{0,3}")
 _NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
 _DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 _NON_ALNUM_PATTERN = re.compile(r"[^a-z0-9]+")
-
-_IDENTITY_COLUMNS = frozenset(
-    {
-        "fullname",
-        "firstname",
-        "lastname",
-        "middlename",
-        "name",
-        "patientname",
-        "patientid",
-        "patientidentifier",
-        "mrn",
-        "medicalrecordnumber",
-        "email",
-        "emailaddress",
-        "cpf",
-        "ssn",
-        "nationalid",
-        "dateofbirth",
-        "dob",
-        "birthdate",
-        "phone",
-        "phonenumber",
-        "telephone",
-        "address",
-        "homeaddress",
-        "emergencycontact",
-    }
-)
 
 _REFERENCE_COLUMNS = frozenset(
     {
@@ -261,7 +233,7 @@ def _normalize_key(value: str) -> str:
 
 
 def _is_forbidden_identity(value: str) -> bool:
-    return _normalize_key(value) in _IDENTITY_COLUMNS
+    return _key_category(value) is not None
 
 
 def _is_reference_value(value: str) -> bool:

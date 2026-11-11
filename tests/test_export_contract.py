@@ -176,7 +176,23 @@ def test_hash_mismatch() -> None:
 
 
 @pytest.mark.parametrize(
-    "column", ["full_name", "patientId", "email", "cpf", "date_of_birth", "phone_number"]
+    "column",
+    [
+        "full_name",
+        "patientId",
+        "email",
+        "cpf",
+        "date_of_birth",
+        "phone_number",
+        "surname",
+        "given_name",
+        "tax_id",
+        "government_id",
+        "mobile",
+        "next_of_kin",
+        "birthday",
+        "street_address",
+    ],
 )
 def test_identity_columns_rejected(column: str) -> None:
     manifest = _manifest()
