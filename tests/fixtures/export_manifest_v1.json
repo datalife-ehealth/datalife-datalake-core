@@ -1,0 +1,34 @@
+{
+  "contract_version": "1.0",
+  "release_id": "rel-2026-0001",
+  "deidentification": {
+    "policy_version": "1",
+    "direct_identifiers_removed": true,
+    "subject_key_pseudonymous": true
+  },
+  "tables": [
+    {
+      "name": "observations",
+      "location": "releases/rel-2026-0001/observations.jsonl",
+      "row_count": 4,
+      "columns": [
+        "subject_key",
+        "observed_on",
+        "code",
+        "value"
+      ],
+      "sha256": "d95c60fd4cd08ec4db180c010f9a0289e7771f1f85c331341a47c45fde190a29"
+    },
+    {
+      "name": "lab_panels",
+      "location": "releases/rel-2026-0001/lab_panels.jsonl",
+      "row_count": 3,
+      "columns": [
+        "subject_key",
+        "panel",
+        "result"
+      ],
+      "sha256": "03d9274a5491feb6a2e088ba734db75b9475373656343fd493dff4205e467c94"
+    }
+  ]
+}

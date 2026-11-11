@@ -1,0 +1,45 @@
+{
+  "observations": [
+    {
+      "subject_key": "subj-0001",
+      "observed_on": "2026-01-12",
+      "code": "obs-a",
+      "value": 5.4
+    },
+    {
+      "subject_key": "subj-0002",
+      "observed_on": "2026-02-03",
+      "code": "obs-b",
+      "value": 92
+    },
+    {
+      "subject_key": "subj-0003",
+      "observed_on": "2026-03-21",
+      "code": "obs-c",
+      "value": 13.2
+    },
+    {
+      "subject_key": "subj-0004",
+      "observed_on": "2026-04-08",
+      "code": "obs-d",
+      "value": 0.9
+    }
+  ],
+  "lab_panels": [
+    {
+      "subject_key": "subj-0001",
+      "panel": "panel-x",
+      "result": 4.1
+    },
+    {
+      "subject_key": "subj-0003",
+      "panel": "panel-y",
+      "result": 7.6
+    },
+    {
+      "subject_key": "subj-0002",
+      "panel": "panel-z",
+      "result": 2.2
+    }
+  ]
+}

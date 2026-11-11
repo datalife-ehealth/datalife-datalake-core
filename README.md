@@ -140,6 +140,44 @@ curl http://127.0.0.1:8000/api/v1/audit/verify
 
 `ok` is true when every block height, previous hash, Merkle root, and block hash still match the stored records.
 
+## Analytics export contract
+
+The analytics export manifest is the read-only provenance record for one
+published release consumed by `datalife-analytics-downstream`. It records
+what was released, where the released files live, and how many rows and which
+columns each file holds. A manifest cannot mutate a release, and validation
+never writes to storage.
+
+Required fields:
+
+* `contract_version`: the manifest format version, written as `MAJOR.MINOR`.
+* `release_id`: the release identifier, of the form `rel-YYYY-NNNN`.
+* `deidentification`: the policy version plus both required policy flags.
+* `tables`: one entry per released table, each with `name`, `location`,
+  `row_count`, `columns`, and `sha256`.
+
+Compatibility follows `MAJOR.MINOR`. A manifest is accepted when its major
+version matches the supported major and its minor is at or below the supported
+minor. A different major, a newer minor, or a version that is not `MAJOR.MINOR`
+is rejected.
+
+The handoff boundary is strict. Consumers read released files and the manifest
+only. They must never read transactional tables or call `/api/v1` routes, and
+the manifest deliberately carries no such references.
+
+Validate a manifest before consuming a release:
+
+```bash
+PYTHONPATH=src python -m services.export_contract tests/fixtures/export_manifest_v1.json
+```
+
+Exit codes: `0` means the manifest is valid, `1` means validation found
+problems and prints each one as `<code> <path>`, and `2` means the input could
+not be read.
+
+This contract is a provenance and validation aid only. It makes no clinical,
+anonymity, or de-identification certification claim.
+
 ## Tests and Benchmarks
 
 Run routine unit and concurrency tests (`tests/test_merkle.py`, `tests/test_access.py`, `tests/test_concurrency.py`, `tests/test_ingestion_validation.py`):
