@@ -8,6 +8,7 @@ values; negatives use realistic clinical content to guard against false positive
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -90,6 +91,142 @@ def test_json_email_as_key_uses_placeholder_path():
     assert findings and findings[0].category == "email"
     assert "john@example.com" not in repr(findings)
     assert findings[0].path.endswith("<key>")
+
+
+# ------------------------------------------------------ unit + API: nested JSON boundary
+
+
+@pytest.mark.parametrize(
+    "body,category,identifier",
+    [
+        (
+            '{"bundle": [null, {"  eMaIl \\t": "Case.Patient@example.org"}]}',
+            "email",
+            "Case.Patient@example.org",
+        ),
+        (
+            '{"events": [["routine", {"note": "call +44 7911 123456"}]]}',
+            "phone",
+            "+44 7911 123456",
+        ),
+        (
+            '{"records": [{"nested": [{"external_ref": "012.345.678-90"}]}]}',
+            "government_id",
+            "012.345.678-90",
+        ),
+        (
+            '{"results": [false, {"details": {"reference": "SSN 123-45-6789"}}]}',
+            "government_id",
+            "123-45-6789",
+        ),
+        (
+            '{"observations": [{"  PATIENT_ID  ": "123.456.789-09"}]}',
+            "government_id",
+            "123.456.789-09",
+        ),
+    ],
+    ids=[
+        "mixed-array-case-key-email",
+        "nested-formatted-phone",
+        "nested-cpf",
+        "mixed-array-ssn",
+        "spaced-key",
+    ],
+)
+def test_nested_json_pii_is_rejected_without_reflection(client, body, category, identifier):
+    findings = _scan("json", "application/json", body)
+    assert any(finding.category == category for finding in findings)
+    assert identifier not in repr(findings)
+
+    response = _ingest(client, "json", "application/json", body)
+    assert response.status_code == 422
+    assert identifier not in response.text
+
+
+def test_deeply_nested_json_pii_is_rejected_without_reflection(client):
+    identifier = "deep.patient@example.org"
+    payload: object = {"clinical_note": "contact " + identifier}
+    for _ in range(12):
+        payload = [None, {"nested": payload}]
+    body = json.dumps(payload)
+
+    findings = _scan("json", "application/json", body)
+    assert any(finding.category == "email" for finding in findings)
+    assert identifier not in repr(findings)
+
+    response = _ingest(client, "json", "application/json", body)
+    assert response.status_code == 422
+    assert identifier not in response.text
+
+
+# ------------------------------------------ unit + API: clinical positive controls
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param(
+            {
+                "vital": {
+                    "code": "85354-9",
+                    "display": "BP 120/80 mmHg",
+                    "systolic": 120,
+                    "diastolic": 80,
+                }
+            },
+            id="blood-pressure",
+        ),
+        pytest.param(
+            {
+                "observation": {
+                    "code": "4548-4",
+                    "display": "HbA1c 6.5%",
+                    "value": 6.5,
+                    "unit": "%",
+                }
+            },
+            id="hba1c",
+        ),
+        pytest.param(
+            {
+                "observation": {
+                    "code": "33914-3",
+                    "display": "eGFR 58 mL/min",
+                    "value": 58,
+                    "unit": "mL/min",
+                }
+            },
+            id="egfr",
+        ),
+        pytest.param(
+            {
+                "vitals": [
+                    {"code": "8867-4", "display": "HR 72 bpm", "value": 72, "unit": "bpm"}
+                ]
+            },
+            id="heart-rate",
+        ),
+        pytest.param(
+            {"diagnosis": {"system": "ICD-10", "code": "E11.9"}},
+            id="icd-10",
+        ),
+        pytest.param(
+            {
+                "observation": {
+                    "code": "laboratory-panel",
+                    "collected_at": "2024-03-15T12:34:56Z",
+                }
+            },
+            id="iso-8601",
+        ),
+    ],
+)
+def test_clinical_observation_positive_controls_are_accepted(client, payload):
+    body = json.dumps(payload)
+    assert _scan("json", "application/json", body) == []
+
+    response = _ingest(client, "json", "application/json", body)
+    assert response.status_code == 200
 
 
 # ----------------------------------------------------------- unit: false positives
