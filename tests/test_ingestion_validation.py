@@ -34,11 +34,44 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _ingest(client: TestClient, kind: str, media_type: str, body: str):
+def _ingest(client: TestClient, kind: str, media_type: str, body: str, *, subject_key: str = "subj-0001"):
     return client.post(
         "/api/v1/ingest",
-        json={"subject_key": "subj-0001", "kind": kind, "media_type": media_type, "body": body},
+        json={"subject_key": subject_key, "kind": kind, "media_type": media_type, "body": body},
     )
+
+
+@pytest.mark.parametrize(
+    "subject_key",
+    [
+        "audit@example.org",
+        "+1 (202) 555-0198",
+        "123-45-6789",
+        "123.456.789-09",
+        "Jane Doe",
+        "free text subject key",
+    ],
+    ids=["email", "phone", "ssn", "cpf", "name", "free-text"],
+)
+def test_subject_key_rejects_direct_identifiers_and_free_text_without_reflection(client, subject_key):
+    response = _ingest(client, "json", "application/json", '{"panel": "metabolic"}', subject_key=subject_key)
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"][-1] == "subject_key"
+    assert subject_key not in response.text
+
+
+@pytest.mark.parametrize(
+    "subject_key",
+    [
+        "550e8400-e29b-41d4-a716-446655440000",
+        "syn-0123456789abcdef",
+        "subj-0001",
+    ],
+    ids=["uuidv4", "syn", "legacy-fixture"],
+)
+def test_subject_key_accepts_pseudonymous_formats(client, subject_key):
+    response = _ingest(client, "json", "application/json", '{"panel": "metabolic"}', subject_key=subject_key)
+    assert response.status_code == 200
 
 
 # --------------------------------------------------------------------- JSON path

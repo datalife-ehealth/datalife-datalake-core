@@ -98,8 +98,29 @@ anything is written to the audit ledger.
 Rejections return a single stable HTTP 422 and never echo the matched value or
 payload into the response, logs, or audit events. The detectors are intentionally
 narrow to avoid flagging clinical codes, measurements, and dates; this is boundary
-rejection, not de-identification, and makes no anonymization claim. `subject_key`,
-server-issued tokens, and configured `physician_id` values are not scanned.
+rejection, not de-identification, and makes no anonymization claim. Ingestion also
+requires `subject_key` to be a canonical UUIDv4, `syn-` plus 16 lowercase hex
+characters, or the legacy `subj-[a-z0-9]{1,32}` synthetic fixture form. Subject
+keys are scanned for direct identifiers before this format check. Server-issued
+tokens and configured `physician_id` values are not scanned.
+
+### Implementation Maturity & Threat Boundary
+
+**Implemented:** bounded JSON/XML/DICOM parsing, recursive nested PII boundary
+scanning, pseudonymous `subject_key` enforcement, non-reflective HTTP 422 rejection,
+metadata persistence, and SHA-256/Merkle verification.
+
+**In Progress:** the frozen research protocol (`E1`-`E5` selection decomposition and
+`GASE-S`/`GASE-R` evaluation harness) and cross-repo schema alignment.
+
+**Planned:** Ed25519 `ApprovalReceiptV1` signature verification with persistent nonce
+replay protection, envelope-encrypted `PayloadStore`, and RESTful `ExportGrant`
+enforcement.
+
+The boundary is a **Direct-Identifier Non-Ingress Boundary under an Explicit Threat
+Model**. It distinguishes detectable prohibited cues `D_i` from unrestricted latent
+PII `V_i` embedded in free prose; it is a fail-closed ingress policy, not a claim that
+all latent identity information can be detected or removed.
 
 `payload_sha256` is always computed over the original UTF-8 request body, so parser
 normalization never changes the digest. Limits are configurable via the

@@ -25,9 +25,9 @@ Design constraints:
   identifiers. This is rejection at the boundary, not de-identification; it makes no
   anonymization or regulatory-conformance claim.
 
-Scope boundaries: opaque ``subject_key`` values, server-issued tokens, and
-configured ``physician_id`` values are not identity payloads and are never scanned
-by callers of this module.
+Scope boundaries: ``scan_payload`` does not traverse the request envelope or
+server-issued tokens. ``subject_key`` has its own boundary validator below, while
+configured ``physician_id`` values remain outside this payload policy.
 """
 
 from __future__ import annotations
@@ -157,6 +157,26 @@ _PHONE_RE = re.compile(
 _MIN_PHONE_DIGITS = 7
 
 
+# Subject keys are deliberately narrower than arbitrary opaque strings. ``subj-``
+# is retained for the repository's existing synthetic fixtures; new integrations
+# should prefer the UUIDv4 or ``syn-`` forms.
+_SUBJECT_UUID_V4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+)
+_SUBJECT_SYN_RE = re.compile(r"^syn-[0-9a-f]{16}$")
+_SUBJECT_LEGACY_RE = re.compile(r"^subj-[a-z0-9]{1,32}$")
+_NAME_LIKE_SUBJECT_RE = re.compile(r"^[A-Za-z]+(?:[ .'-][A-Za-z]+)*$")
+
+
+def is_pseudonymous_subject_key(value: str) -> bool:
+    """Return whether ``value`` uses an accepted pseudonymous key format."""
+    return bool(
+        _SUBJECT_UUID_V4_RE.fullmatch(value)
+        or _SUBJECT_SYN_RE.fullmatch(value)
+        or _SUBJECT_LEGACY_RE.fullmatch(value)
+    )
+
+
 def _detect_value(text: str) -> str | None:
     """Return a category if ``text`` contains an obvious identifier value.
 
@@ -174,6 +194,25 @@ def _detect_value(text: str) -> str | None:
         if sum(char.isdigit() for char in match.group()) >= _MIN_PHONE_DIGITS:
             return "phone"
     return None
+
+
+def scan_subject_key(value: str) -> list[PiiFinding]:
+    """Scan a subject key for direct identifiers before format validation.
+
+    Subject keys are not part of the normalized clinical payload, so they need an
+    explicit check at the request boundary. The format validator rejects all other
+    free text; this scan gives direct email, phone, government-ID, and name-shaped
+    values the same PII policy treatment as payload values.
+    """
+    category = _detect_value(value)
+    if category:
+        return [PiiFinding(category, "subject_key")]
+
+    # Do not classify an accepted synthetic key as a name merely because its
+    # ``subj-`` prefix contains alphabetic segments.
+    if not is_pseudonymous_subject_key(value) and _NAME_LIKE_SUBJECT_RE.fullmatch(value):
+        return [PiiFinding("patient_name", "subject_key")]
+    return []
 
 
 # ------------------------------------------------------------------- traversal API
