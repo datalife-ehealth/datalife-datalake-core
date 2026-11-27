@@ -6,14 +6,14 @@ import hashlib
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from core.config import get_settings
 from core.database import get_session, session_scope
 from services import documents as documents_service
 from services.parsing import ParseError, parse_payload
-from services.pii import scan_payload
+from services.pii import is_pseudonymous_subject_key, scan_payload, scan_subject_key
 
 router = APIRouter(prefix="/api/v1/ingest", tags=["ingestion"])
 
@@ -24,6 +24,7 @@ SessionDep = Annotated[Session, Depends(get_session)]
 # One stable rejection message. The policy returns a category and safe field path for
 # diagnostics, but the response never reflects which value or payload fragment matched.
 _PII_REJECTED = "personal identifiers are not accepted by the lake tier"
+_SUBJECT_KEY_REJECTED = "subject_key must be a pseudonymous identifier"
 
 
 class IngestRequest(BaseModel):
@@ -31,6 +32,15 @@ class IngestRequest(BaseModel):
     kind: str = Field(pattern="^(json|xml|dicom)$")
     media_type: str = "application/octet-stream"
     body: str = Field(min_length=1)
+
+    @field_validator("subject_key")
+    @classmethod
+    def validate_subject_key(cls, value: str) -> str:
+        # Run the PII policy independently of the shape check so direct identifiers
+        # receive the same fail-closed treatment as identifiers in clinical payloads.
+        if scan_subject_key(value) or not is_pseudonymous_subject_key(value):
+            raise ValueError(_SUBJECT_KEY_REJECTED)
+        return value
 
 
 def reset_store() -> None:
